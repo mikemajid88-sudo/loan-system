@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Account settings — Northgate Loans</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Northgate <span class="mark">Loans</span></div>
+    <nav>
+      <span class="user-chip" id="userChip"></span>
+      <a href="#" id="backLink">Back</a>
+      <a href="#" onclick="logout()">Sign out</a>
+    </nav>
+  </div>
+
+  <div class="wrap narrow">
+    <h1>Change password</h1>
+    <div class="panel">
+      <form id="pwForm">
+        <label for="current_password">Current password</label>
+        <input id="current_password" type="password" required autocomplete="current-password" />
+
+        <label for="new_password">New password</label>
+        <input id="new_password" type="password" required minlength="6" autocomplete="new-password" />
+
+        <button class="btn btn-primary btn-block" type="submit" id="submitBtn">Update password</button>
+      </form>
+      <div id="errorBox" class="error-msg hidden"></div>
+      <div id="successBox" class="success-msg hidden"></div>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    const user = Auth.requireRole(['borrower', 'staff', 'admin']);
+    if (user) document.getElementById('userChip').textContent = user.full_name;
+    document.getElementById('backLink').href = user.role === 'borrower' ? '/dashboard.html' : '/staff.html';
+
+    document.getElementById('pwForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('submitBtn');
+      const errorBox = document.getElementById('errorBox');
+      const successBox = document.getElementById('successBox');
+      errorBox.classList.add('hidden');
+      successBox.classList.add('hidden');
+      btn.disabled = true;
+      btn.textContent = 'Updating…';
+
+      try {
+        const body = {
+          current_password: document.getElementById('current_password').value,
+          new_password: document.getElementById('new_password').value,
+        };
+        await api('/auth/change-password', { method: 'POST', body });
+        successBox.textContent = 'Password updated.';
+        successBox.classList.remove('hidden');
+        document.getElementById('pwForm').reset();
+      } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Update password';
+      }
+    });
+  </script>
+</body>
+</html>
