@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Staff dashboard — Northgate Loans</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Northgate <span class="mark">Loans</span></div>
+    <nav>
+      <span class="user-chip" id="userChip"></span>
+      <a href="#" onclick="logout()">Sign out</a>
+    </nav>
+  </div>
+
+  <div class="wrap">
+    <h1>Staff dashboard</h1>
+
+    <div class="stat-grid" id="statGrid"></div>
+
+    <div class="tabs" id="tabs">
+      <div class="tab active" data-status="">All</div>
+      <div class="tab" data-status="pending">Pending</div>
+      <div class="tab" data-status="under_review">Under review</div>
+      <div class="tab" data-status="approved">Approved</div>
+      <div class="tab" data-status="rejected">Rejected</div>
+      <div class="tab" data-status="disbursed">Disbursed</div>
+    </div>
+
+    <div id="content"><p class="muted">Loading…</p></div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    const user = Auth.requireRole(['staff', 'admin']);
+    if (user) document.getElementById('userChip').textContent = `${user.full_name} (${user.role})`;
+
+    async function loadStats() {
+      const grid = document.getElementById('statGrid');
+      try {
+        const { counts, totalBorrowers, disbursedTotal } = await api('/loans/stats/summary');
+        const byStatus = Object.fromEntries(counts.map(c => [c.status, c.count]));
+        const cards = [
+          { lbl: 'Pending', num: byStatus.pending || 0 },
+          { lbl: 'Under review', num: byStatus.under_review || 0 },
+          { lbl: 'Approved', num: byStatus.approved || 0 },
+          { lbl: 'Disbursed', num: byStatus.disbursed || 0 },
+          { lbl: 'Registered borrowers', num: totalBorrowers },
+          { lbl: 'Total disbursed (KES)', num: money(disbursedTotal) },
+        ];
+        grid.innerHTML = cards.map(c => `
+          <div class="stat-card"><div class="num">${c.num}</div><div class="lbl">${c.lbl}</div></div>
+        `).join('');
+      } catch (e) { /* non-fatal */ }
+    }
+
+    async function loadLoans(status) {
+      const content = document.getElementById('content');
+      content.innerHTML = '<p class="muted">Loading…</p>';
+      try {
+        const qs = status ? `?status=${status}` : '';
+        const { loans } = await api(`/loans${qs}`);
+
+        if (loans.length === 0) {
+          content.innerHTML = `<div class="panel empty-state"><h3>Nothing here</h3><p>No loan applications match this filter.</p></div>`;
+          return;
+        }
+
+        content.innerHTML = `
+          <div class="panel" style="padding:0;">
+            <table>
+              <thead>
+                <tr><th>Applied</th><th>Applicant</th><th>Amount</th><th>Term</th><th>Status</th><th></th></tr>
+              </thead>
+              <tbody>
+                ${loans.map(l => `
+                  <tr class="clickable" onclick="window.location.href='/loan.html?id=${l.id}'">
+                    <td>${fmtDate(l.created_at)}</td>
+                    <td>${l.full_name}<br/><span class="muted">${l.email}</span></td>
+                    <td>KES ${money(l.amount)}</td>
+                    <td>${l.term_months} mo</td>
+                    <td>${badge(l.status)}</td>
+                    <td><a href="/loan.html?id=${l.id}">Review →</a></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>`;
+      } catch (err) {
+        content.innerHTML = `<div class="error-msg">${err.message}</div>`;
+      }
+    }
+
+    document.getElementById('tabs').addEventListener('click', (e) => {
+      const tab = e.target.closest('.tab');
+      if (!tab) return;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      loadLoans(tab.dataset.status);
+    });
+
+    loadStats();
+    loadLoans('pending'); // default view: what needs attention
+    document.querySelector('.tab[data-status="pending"]').classList.add('active');
+    document.querySelector('.tab[data-status=""]').classList.remove('active');
+  </script>
+</body>
+</html>

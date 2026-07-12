@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Apply for a loan — Northgate Loans</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Northgate <span class="mark">Loans</span></div>
+    <nav>
+      <span class="user-chip" id="userChip"></span>
+      <a href="/dashboard.html">My loans</a>
+      <a href="#" onclick="logout()">Sign out</a>
+    </nav>
+  </div>
+
+  <div class="wrap narrow">
+    <h1>Apply for a loan</h1>
+    <div class="panel">
+      <form id="applyForm">
+        <label for="amount">Loan amount (KES)</label>
+        <input id="amount" type="number" min="1000" step="100" required />
+
+        <label for="term_months">Repayment term (months)</label>
+        <input id="term_months" type="number" min="1" max="60" required />
+
+        <label for="purpose">Purpose of loan</label>
+        <textarea id="purpose" placeholder="e.g. School fees, stock for my shop, medical bill…"></textarea>
+
+        <div id="calcPreview" class="hidden" style="margin-top:18px; padding:14px; background:#F0F3F7; border-radius:6px; font-size:14px;"></div>
+
+        <button class="btn btn-primary btn-block" type="submit" id="submitBtn">Submit application</button>
+      </form>
+      <div id="errorBox" class="error-msg hidden"></div>
+      <div id="successBox" class="success-msg hidden"></div>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    const user = Auth.requireRole(['borrower']);
+    if (user) document.getElementById('userChip').textContent = user.full_name;
+
+    const amountEl = document.getElementById('amount');
+    const termEl = document.getElementById('term_months');
+    const preview = document.getElementById('calcPreview');
+    let calcTimer;
+
+    function scheduleCalc() {
+      clearTimeout(calcTimer);
+      calcTimer = setTimeout(runCalc, 350);
+    }
+    async function runCalc() {
+      const amount = Number(amountEl.value);
+      const term_months = Number(termEl.value);
+      if (!amount || !term_months) { preview.classList.add('hidden'); return; }
+      try {
+        const calc = await api('/loans/calculate', { method: 'POST', body: { amount, term_months } });
+        preview.classList.remove('hidden');
+        preview.innerHTML = `
+          <strong>Estimated repayment</strong> (at ${calc.interest_rate}% p.a.)<br/>
+          Monthly payment: <strong>KES ${money(calc.monthlyPayment)}</strong><br/>
+          Total repayable: KES ${money(calc.totalRepayable)} (interest: KES ${money(calc.totalInterest)})
+        `;
+      } catch (e) { /* ignore preview errors */ }
+    }
+    amountEl.addEventListener('input', scheduleCalc);
+    termEl.addEventListener('input', scheduleCalc);
+
+    document.getElementById('applyForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('submitBtn');
+      const errorBox = document.getElementById('errorBox');
+      const successBox = document.getElementById('successBox');
+      errorBox.classList.add('hidden');
+      successBox.classList.add('hidden');
+      btn.disabled = true;
+      btn.textContent = 'Submitting…';
+
+      try {
+        const body = {
+          amount: Number(amountEl.value),
+          term_months: Number(termEl.value),
+          purpose: document.getElementById('purpose').value.trim(),
+        };
+        const data = await api('/loans/apply', { method: 'POST', body });
+        successBox.textContent = 'Application submitted. Redirecting…';
+        successBox.classList.remove('hidden');
+        setTimeout(() => { window.location.href = `/loan.html?id=${data.loan.id}`; }, 900);
+      } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Submit application';
+      }
+    });
+  </script>
+</body>
+</html>

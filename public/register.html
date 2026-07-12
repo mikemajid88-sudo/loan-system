@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Create account — Northgate Loans</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="center-page">
+    <div class="wrap narrow">
+      <div class="panel">
+        <div class="eyebrow">Northgate Loans</div>
+        <h1 style="margin-top:0;">Create your account</h1>
+        <p class="muted">Register as a borrower to apply for a loan.</p>
+
+        <form id="regForm">
+          <label for="full_name">Full name</label>
+          <input id="full_name" required autocomplete="name" />
+
+          <label for="email">Email</label>
+          <input id="email" type="email" required autocomplete="email" />
+
+          <label for="phone">Phone number</label>
+          <input id="phone" autocomplete="tel" />
+
+          <label for="national_id">National ID number</label>
+          <input id="national_id" />
+
+          <label for="password">Password</label>
+          <input id="password" type="password" required minlength="6" autocomplete="new-password" />
+
+          <button class="btn btn-primary btn-block" type="submit" id="submitBtn">Create account</button>
+        </form>
+
+        <div id="errorBox" class="error-msg hidden"></div>
+
+        <p class="muted" style="margin-top:20px;">
+          Already registered? <a href="/index.html">Sign in</a>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    document.getElementById('regForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('submitBtn');
+      const errorBox = document.getElementById('errorBox');
+      errorBox.classList.add('hidden');
+      btn.disabled = true;
+      btn.textContent = 'Creating account…';
+
+      try {
+        const body = {
+          full_name: document.getElementById('full_name').value.trim(),
+          email: document.getElementById('email').value.trim(),
+          phone: document.getElementById('phone').value.trim(),
+          national_id: document.getElementById('national_id').value.trim(),
+          password: document.getElementById('password').value,
+        };
+        const data = await api('/auth/register', { method: 'POST', body });
+        Auth.setSession(data.token, data.user);
+        window.location.href = '/dashboard.html';
+      } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Create account';
+      }
+    });
+  </script>
+</body>
+</html>
