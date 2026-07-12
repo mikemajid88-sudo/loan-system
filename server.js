@@ -5,6 +5,9 @@ const cors = require('cors');
 
 const authRoutes = require('./src/routes/auth');
 const loanRoutes = require('./src/routes/loans');
+const { ensureDefaultAdmin } = require('./src/seed');
+
+ensureDefaultAdmin();
 
 const app = express();
 const PORT = process.env.PORT || 3000;

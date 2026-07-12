@@ -38,20 +38,33 @@ Open `.env` and set a long random `JWT_SECRET` (used to sign login
 tokens). Adjust `DEFAULT_INTEREST_RATE`, `MIN_LOAN_AMOUNT`, and
 `MAX_LOAN_AMOUNT` if needed.
 
-## 3. Create your first staff/admin account
+## 3. First login
 
-Borrowers can self-register through the website, but staff accounts are
-created deliberately from the command line so random visitors can't grant
-themselves approval powers:
+The app automatically creates a default admin account the very first time
+it starts, if no staff/admin account exists yet:
 
-```bash
-node create-staff.js "Jane Doe" jane@example.com "a-strong-password" admin
+```
+Email:    admin@example.com
+Password: ChangeMe123!
 ```
 
-Use `admin` for a full administrator or `staff` for a loan officer — both
-roles can vet, approve, reject, and disburse loans today; `admin` is there
-for when you want to add admin-only features later (e.g. managing staff
-accounts).
+Sign in with these, then **immediately go to Account → Change password**
+in the top menu to set your own password. This default account is only
+ever created once — after that first login it behaves like any other
+admin account.
+
+Want a different default instead of typing your own password every time?
+Set `DEFAULT_ADMIN_EMAIL` and `DEFAULT_ADMIN_PASSWORD` in your `.env`
+before first startup and those will be used instead.
+
+**Adding more staff later:** once you're signed in as admin, create
+additional staff accounts from the command line (borrowers can't grant
+themselves staff access — only admins can create staff/admin accounts,
+deliberately kept out of the public website):
+
+```bash
+node create-staff.js "Jane Doe" jane@example.com "a-strong-password" staff
+```
 
 ## 4. Run it
 
