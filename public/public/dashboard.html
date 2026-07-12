@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>My loans — Northgate Loans</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Northgate <span class="mark">Loans</span></div>
+    <nav>
+      <span class="user-chip" id="userChip"></span>
+      <a href="/account.html">Account</a>
+      <a href="#" onclick="logout()">Sign out</a>
+    </nav>
+  </div>
+
+  <div class="wrap">
+    <div class="row-flex" style="justify-content: space-between; margin-bottom: 24px;">
+      <h1 style="margin:0;">My loans</h1>
+      <a href="/apply.html" class="btn btn-amber" id="applyBtn">Apply for a loan</a>
+    </div>
+
+    <div id="content">
+      <p class="muted">Loading…</p>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    const user = Auth.requireRole(['borrower']);
+    if (user) document.getElementById('userChip').textContent = user.full_name;
+
+    async function load() {
+      const content = document.getElementById('content');
+      try {
+        const { loans } = await api('/loans/my');
+        const applyBtn = document.getElementById('applyBtn');
+        const hasOpen = loans.some(l => ['pending', 'under_review', 'approved'].includes(l.status));
+        if (hasOpen) {
+          applyBtn.classList.add('hidden');
+        }
+
+        if (loans.length === 0) {
+          content.innerHTML = `
+            <div class="panel empty-state">
+              <h3>No loans yet</h3>
+              <p>Apply for your first loan to get started.</p>
+              <a href="/apply.html" class="btn btn-primary">Apply for a loan</a>
+            </div>`;
+          return;
+        }
+
+        content.innerHTML = `
+          <div class="panel" style="padding:0;">
+            <table>
+              <thead>
+                <tr><th>Applied</th><th>Amount</th><th>Term</th><th>Monthly</th><th>Status</th><th></th></tr>
+              </thead>
+              <tbody>
+                ${loans.map(l => `
+                  <tr class="clickable" onclick="window.location.href='/loan.html?id=${l.id}'">
+                    <td>${fmtDate(l.created_at)}</td>
+                    <td>KES ${money(l.amount)}</td>
+                    <td>${l.term_months} mo</td>
+                    <td>KES ${money(l.monthly_payment)}</td>
+                    <td>${badge(l.status)}</td>
+                    <td><a href="/loan.html?id=${l.id}">View →</a></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>`;
+      } catch (err) {
+        content.innerHTML = `<div class="error-msg">${err.message}</div>`;
+      }
+    }
+    load();
+  </script>
+</body>
+</html>
