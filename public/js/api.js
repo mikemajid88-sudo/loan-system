@@ -12,11 +12,16 @@ const Auth = {
     localStorage.removeItem('lms_token');
     localStorage.removeItem('lms_user');
   },
+  hasAnyRole: (user, roles) => user && user.roles && user.roles.some(r => roles.includes(r)),
   requireRole: (roles) => {
     const user = Auth.getUser();
     const token = Auth.getToken();
-    if (!token || !user || !roles.includes(user.role)) {
+    if (!token || !user || !Auth.hasAnyRole(user, roles)) {
       window.location.href = '/index.html';
+      return null;
+    }
+    if (user.must_change_password && roles[0] !== '__account_page__') {
+      window.location.href = '/account.html?forced=1';
       return null;
     }
     return user;
@@ -77,4 +82,22 @@ function countdownPill(daysRemaining, status) {
 async function getSettings() {
   const { settings } = await api('/settings');
   return settings;
+}
+
+async function pushWhatsApp(toPhone, defaultMessage, loanId) {
+  const message = prompt(`Message to send to ${toPhone}:`, defaultMessage);
+  if (message === null) return false; // cancelled
+  if (!message.trim()) { alert('Message cannot be empty'); return false; }
+  try {
+    const result = await api('/whatsapp/push', { method: 'POST', body: { to_phone: toPhone, message, loan_id: loanId || null } });
+    if (result.sent) {
+      alert('Message sent on WhatsApp.');
+    } else {
+      alert('WhatsApp is not configured yet, so this was logged but not actually sent. See the README to set up free WhatsApp sending.');
+    }
+    return true;
+  } catch (e) {
+    alert('Failed to send: ' + e.message);
+    return false;
+  }
 }

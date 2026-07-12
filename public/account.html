@@ -18,6 +18,10 @@
 
   <div class="wrap narrow">
     <h1>Change password</h1>
+    <div id="forcedNotice" class="panel hidden" style="margin-bottom:16px; border-color: var(--amber); background: var(--amber-bg);">
+      <strong>You must set a new password before continuing.</strong>
+      <p class="muted" style="margin:6px 0 0;">Your account was created with a temporary password. Please choose your own before you can use the rest of the app.</p>
+    </div>
     <div class="panel">
       <form id="pwForm">
         <label for="current_password">Current password</label>
@@ -35,9 +39,20 @@
 
   <script src="/js/api.js"></script>
   <script>
-    const user = Auth.requireRole(['borrower', 'staff', 'admin']);
+    // Bypass the forced-password redirect here specifically, since this IS the
+    // page that resolves it - otherwise a forced user could never reach it.
+    const user = Auth.getUser();
+    const token = Auth.getToken();
+    if (!token || !user) window.location.href = '/index.html';
+
+    const isForced = new URLSearchParams(window.location.search).get('forced') === '1' || (user && user.must_change_password);
+    if (isForced) {
+      document.getElementById('forcedNotice').classList.remove('hidden');
+      document.getElementById('backLink').classList.add('hidden');
+    } else {
+      document.getElementById('backLink').href = Auth.hasAnyRole(user, ['member']) ? '/dashboard.html' : '/staff.html';
+    }
     if (user) document.getElementById('userChip').textContent = user.full_name;
-    document.getElementById('backLink').href = user.role === 'borrower' ? '/dashboard.html' : '/staff.html';
 
     document.getElementById('pwForm').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -55,9 +70,22 @@
           new_password: document.getElementById('new_password').value,
         };
         await api('/auth/change-password', { method: 'POST', body });
-        successBox.textContent = 'Password updated.';
-        successBox.classList.remove('hidden');
-        document.getElementById('pwForm').reset();
+
+        // Refresh cached user so must_change_password clears and routing works normally again
+        const { user: fresh } = await api('/auth/me');
+        Auth.setSession(Auth.getToken(), fresh);
+
+        if (isForced) {
+          successBox.textContent = 'Password updated. Redirecting…';
+          successBox.classList.remove('hidden');
+          setTimeout(() => {
+            window.location.href = Auth.hasAnyRole(fresh, ['member']) ? '/dashboard.html' : '/staff.html';
+          }, 900);
+        } else {
+          successBox.textContent = 'Password updated.';
+          successBox.classList.remove('hidden');
+          document.getElementById('pwForm').reset();
+        }
       } catch (err) {
         errorBox.textContent = err.message;
         errorBox.classList.remove('hidden');

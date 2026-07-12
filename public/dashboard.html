@@ -31,7 +31,7 @@
 
   <script src="/js/api.js"></script>
   <script>
-    const user = Auth.requireRole(['borrower']);
+    const user = Auth.requireRole(['member']);
     if (user) document.getElementById('userChip').textContent = user.full_name;
 
     function statusLabel(l) {

@@ -22,9 +22,9 @@
 
   <script src="/js/api.js"></script>
   <script>
-    const user = Auth.requireRole(['borrower', 'staff', 'admin']);
+    const user = Auth.requireRole(['member','loan_officer','credit_manager','admin','super_admin']);
     if (user) document.getElementById('userChip').textContent = user.full_name;
-    document.getElementById('backLink').href = user.role === 'borrower' ? '/dashboard.html' : '/staff.html';
+    document.getElementById('backLink').href = Auth.hasAnyRole(user, ['member']) ? '/dashboard.html' : '/staff.html';
 
     const params = new URLSearchParams(window.location.search);
     const loanId = params.get('id');
@@ -44,33 +44,48 @@
       const content = document.getElementById('content');
       try {
         const { loan, events, extensions } = await api(`/loans/${loanId}`);
-        const isStaff = ['staff', 'admin'].includes(user.role);
+        const isLoanOfficer = Auth.hasAnyRole(user, ['loan_officer']);
+        const isCreditManager = Auth.hasAnyRole(user, ['credit_manager']);
+        const isStaff = Auth.hasAnyRole(user, ['loan_officer','credit_manager','admin','super_admin']);
         const isOwner = user.id === loan.user_id;
         const isGuarantor = user.id === loan.guarantor_id;
 
         let actions = '';
-        if (isStaff) {
-          if (loan.status === 'pending_level1') {
-            actions += `
-              <button class="btn btn-primary" onclick="level1('passed')">Pass Level 1</button>
-              <button class="btn btn-danger" onclick="level1('rejected')">Reject</button>`;
-          }
-          if (loan.status === 'pending_level2') {
-            actions += `
-              <button class="btn btn-primary" onclick="level2('passed')">Pass Level 2</button>
-              <button class="btn btn-danger" onclick="level2('rejected')">Reject</button>`;
-          }
-          if (loan.status === 'approved') {
-            actions += `<button class="btn btn-amber" onclick="disburse()">Mark as disbursed</button>`;
-          }
-          if (['disbursed', 'defaulted'].includes(loan.status)) {
-            actions += `<button class="btn btn-primary" onclick="repay()">Mark as repaid</button>`;
-          }
+        if (isLoanOfficer && loan.status === 'pending_level1') {
+          actions += `
+            <button class="btn btn-primary" onclick="level1('passed')">Pass Level 1</button>
+            <button class="btn btn-danger" onclick="level1('rejected')">Reject</button>`;
+        }
+        if (isCreditManager && loan.status === 'pending_level2') {
+          actions += `
+            <button class="btn btn-primary" onclick="level2('passed')">Pass Level 2</button>
+            <button class="btn btn-danger" onclick="level2('rejected')">Reject</button>`;
+        }
+        if (isCreditManager && loan.status === 'approved') {
+          actions += `<button class="btn btn-amber" onclick="disburse()">Mark as disbursed</button>`;
+        }
+        if (isCreditManager && ['disbursed', 'defaulted'].includes(loan.status)) {
+          actions += `<button class="btn btn-primary" onclick="repay()">Mark as repaid</button>`;
         }
         if (isGuarantor && loan.guarantor_status === 'pending') {
           actions += `
             <button class="btn btn-primary" onclick="guarantorRespond('approved')">Approve as guarantor</button>
             <button class="btn btn-outline" onclick="guarantorRespond('declined')">Decline</button>`;
+        }
+
+        // WhatsApp push buttons - available to any staff-side role, contextual to loan stage
+        let waButtons = '';
+        if (isStaff && loan.guarantor_status === 'pending' && loan.guarantor_phone) {
+          waButtons += `<button class="btn btn-outline" onclick="pushGuarantorNotice()">📱 Notify guarantor</button>`;
+        }
+        if (isStaff && loan.status === 'approved') {
+          waButtons += `<button class="btn btn-outline" onclick="pushApprovalMessage()">📱 Send approval message</button>`;
+        }
+        if (isStaff && loan.status === 'disbursed') {
+          waButtons += `<button class="btn btn-outline" onclick="pushDisbursementMessage()">📱 Send disbursement notice</button>`;
+        }
+        if (isStaff && (loan.verification_status || true)) {
+          // Generic fallback: staff can always message the applicant directly
         }
 
         const pendingExt = extensions.find(e => e.status === 'pending');
@@ -89,11 +104,15 @@
             <div class="panel" style="margin-bottom:20px; border-color: var(--amber);">
               <h3 style="margin-top:0;">Pending extension request</h3>
               <p>${pendingExt.reason}</p>
-              <div class="row-flex">
+              <div class="row-flex" style="flex-wrap:wrap;">
                 <button class="btn btn-primary" onclick="reviewExtension(${pendingExt.id}, 'approved')">Approve extension</button>
                 <button class="btn btn-danger" onclick="reviewExtension(${pendingExt.id}, 'rejected')">Reject</button>
               </div>
             </div>`;
+        }
+        if (isStaff && extensions.some(e => e.status === 'approved') && loan.status === 'disbursed') {
+          const lastApproved = extensions.find(e => e.status === 'approved');
+          waButtons += `<button class="btn btn-outline" onclick="pushExtensionMessage('${lastApproved.new_due_date}')">📱 Send extension confirmation</button>`;
         }
 
         content.innerHTML = `
@@ -129,16 +148,17 @@
 
           <div class="panel" style="margin-bottom:20px;">
             <h3 style="margin-top:0;">Approval trail</h3>
-            <p><strong>Level 1:</strong> ${loan.level1_status}${loan.level1_note ? ' — ' + loan.level1_note : ''}</p>
-            <p><strong>Level 2:</strong> ${loan.level2_status}${loan.level2_note ? ' — ' + loan.level2_note : ''}</p>
+            <p><strong>Level 1 (Loan Officer):</strong> ${loan.level1_status}${loan.level1_note ? ' — ' + loan.level1_note : ''}</p>
+            <p><strong>Level 2 (Credit Manager):</strong> ${loan.level2_status}${loan.level2_note ? ' — ' + loan.level2_note : ''}</p>
           </div>
 
           ${extensionBox}
 
-          ${actions ? `
+          ${actions || waButtons ? `
             <div class="panel" style="margin-bottom:20px;">
               <h3 style="margin-top:0;">Actions</h3>
               <div class="row-flex" style="flex-wrap:wrap;">${actions}</div>
+              ${waButtons ? `<div class="row-flex" style="flex-wrap:wrap; margin-top:${actions ? '12px' : '0'};">${waButtons}</div>` : ''}
               <div id="errorBox" class="error-msg hidden"></div>
             </div>` : ''}
 
@@ -157,6 +177,8 @@
             </table>
           </div>
         `;
+
+        window._loan = loan; // stash for whatsapp button handlers
       } catch (err) {
         content.innerHTML = `<div class="error-msg">${err.message}</div>`;
       }
@@ -203,6 +225,27 @@
       const note = prompt(`Note for ${decision === 'approved' ? 'approving' : 'rejecting'} this extension (optional):`) || '';
       try { await api(`/loans/extensions/${extId}/review`, { method: 'POST', body: { decision, note } }); load(); }
       catch (e) { showErr(e.message); }
+    }
+
+    function pushGuarantorNotice() {
+      const loan = window._loan;
+      const msg = `Dear ${loan.guarantor_name}, ${loan.full_name} has listed you as guarantor for a Sasa Loan of KES ${loan.amount}. Please log in to Sasa Loan to approve or decline.`;
+      pushWhatsApp(loan.guarantor_phone, msg, loan.id);
+    }
+    function pushApprovalMessage() {
+      const loan = window._loan;
+      const msg = `Dear ${loan.full_name}, your loan has been approved and will be disbursed shortly.`;
+      pushWhatsApp(loan.phone, msg, loan.id);
+    }
+    function pushDisbursementMessage() {
+      const loan = window._loan;
+      const msg = `Dear ${loan.full_name}, your Sasa Loan of KES ${loan.amount} has been disbursed. Repayment of KES ${loan.total_repayable} is due by ${loan.due_date}.`;
+      pushWhatsApp(loan.phone, msg, loan.id);
+    }
+    function pushExtensionMessage(newDueDate) {
+      const loan = window._loan;
+      const msg = `Dear ${loan.full_name}, your extension request has been approved. New amount due: KES ${loan.total_repayable}, new due date: ${newDueDate}.`;
+      pushWhatsApp(loan.phone, msg, loan.id);
     }
 
     load();

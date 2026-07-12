@@ -3,207 +3,218 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Staff dashboard — Sasa Loan</title>
+<title>Dashboard — Sasa Loan</title>
 <link rel="stylesheet" href="/css/style.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 </head>
 <body>
   <div class="topbar">
     <div class="brand">Sasa <span class="mark">Loan</span></div>
     <nav>
       <span class="user-chip" id="userChip"></span>
-      <a href="/account.html">Account</a>
+      <a href="/users.html" id="usersLink" class="hidden">Manage users</a>
       <a href="/settings.html" id="settingsLink" class="hidden">Settings</a>
+      <a href="/account.html">Account</a>
       <a href="#" onclick="logout()">Sign out</a>
     </nav>
   </div>
 
   <div class="wrap">
-    <h1>Staff dashboard</h1>
+    <h1>Dashboard</h1>
     <div class="stat-grid" id="statGrid"></div>
 
-    <div class="tabs" id="mainTabs">
-      <div class="tab active" data-view="verifications">Verifications</div>
-      <div class="tab" data-view="loans">Loans</div>
-      <div class="tab" data-view="extensions">Extension requests</div>
-    </div>
+    <section style="margin-bottom:32px;">
+      <h2 style="font-size:18px;">Pending member registrations</h2>
+      <div id="kycSection"><p class="muted">Loading…</p></div>
+    </section>
 
-    <div id="subTabs" class="tabs hidden"></div>
-    <div id="content"><p class="muted">Loading…</p></div>
+    <section style="margin-bottom:32px;">
+      <h2 style="font-size:18px;">Pending loan applications</h2>
+      <div id="pendingLoansSection"><p class="muted">Loading…</p></div>
+    </section>
+
+    <section style="margin-bottom:32px;">
+      <h2 style="font-size:18px;">Pending extension requests</h2>
+      <div id="extensionsSection"><p class="muted">Loading…</p></div>
+    </section>
+
+    <section style="margin-bottom:32px;">
+      <h2 style="font-size:18px;">Active loans</h2>
+      <div id="activeSection"><p class="muted">Loading…</p></div>
+    </section>
+
+    <section style="margin-bottom:32px;">
+      <h2 style="font-size:18px;">Overdue loans</h2>
+      <div id="overdueSection"><p class="muted">Loading…</p></div>
+    </section>
+
+    <section id="cashflowSection" class="hidden" style="margin-bottom:32px;">
+      <h2 style="font-size:18px;">Cash flow analysis</h2>
+      <div class="panel">
+        <div class="field-row" style="margin-bottom:20px;">
+          <div><span class="muted">Outstanding</span><br/><strong id="cfOutstanding">—</strong></div>
+          <div><span class="muted">Overdue amount</span><br/><strong id="cfOverdue">—</strong></div>
+          <div><span class="muted">Total repaid (all time)</span><br/><strong id="cfRepaid">—</strong></div>
+        </div>
+        <canvas id="cashflowChart" height="90"></canvas>
+      </div>
+    </section>
   </div>
 
   <script src="/js/api.js"></script>
   <script>
-    const user = Auth.requireRole(['staff', 'admin']);
-    if (user) document.getElementById('userChip').textContent = `${user.full_name} (${user.role})`;
-    if (user && user.role === 'admin') document.getElementById('settingsLink').classList.remove('hidden');
-
-    let currentView = 'verifications';
-    let currentLoanStatus = 'pending_level1';
+    const user = Auth.requireRole(['loan_officer','credit_manager','admin','super_admin']);
+    if (user) document.getElementById('userChip').textContent = `${user.full_name} (${user.roles.join(', ')})`;
+    const isSuperAdmin = Auth.hasAnyRole(user, ['super_admin']);
+    const isAdminTier = Auth.hasAnyRole(user, ['admin', 'super_admin']);
+    const isLoanOfficer = Auth.hasAnyRole(user, ['loan_officer']);
+    const isCreditManager = Auth.hasAnyRole(user, ['credit_manager']);
+    if (isSuperAdmin) document.getElementById('usersLink').classList.remove('hidden');
+    if (isAdminTier) {
+      document.getElementById('settingsLink').classList.remove('hidden');
+      document.getElementById('cashflowSection').classList.remove('hidden');
+    }
 
     async function loadStats() {
-      const grid = document.getElementById('statGrid');
       try {
-        const { counts, totalBorrowers, pendingVerification, disbursedTotal } = await api('/loans/stats/summary');
+        const { counts, totalMembers, pendingVerification, disbursedTotal } = await api('/loans/stats/summary');
         const byStatus = Object.fromEntries(counts.map(c => [c.status, c.count]));
         const cards = [
-          { lbl: 'Pending verification', num: pendingVerification },
+          { lbl: 'Pending registrations', num: pendingVerification },
           { lbl: 'Level 1 review', num: byStatus.pending_level1 || 0 },
           { lbl: 'Level 2 review', num: byStatus.pending_level2 || 0 },
           { lbl: 'Active loans', num: byStatus.disbursed || 0 },
           { lbl: 'Overdue', num: byStatus.defaulted || 0 },
           { lbl: 'Total disbursed (KES)', num: money(disbursedTotal) },
         ];
-        grid.innerHTML = cards.map(c => `<div class="stat-card"><div class="num">${c.num}</div><div class="lbl">${c.lbl}</div></div>`).join('');
+        document.getElementById('statGrid').innerHTML = cards.map(c =>
+          `<div class="stat-card"><div class="num">${c.num}</div><div class="lbl">${c.lbl}</div></div>`
+        ).join('');
       } catch (e) { /* non-fatal */ }
     }
 
-    async function loadVerifications() {
-      document.getElementById('subTabs').classList.add('hidden');
-      const content = document.getElementById('content');
-      content.innerHTML = '<p class="muted">Loading…</p>';
+    async function loadKyc() {
+      const el = document.getElementById('kycSection');
       try {
         const { users } = await api('/auth/pending-verifications');
-        if (users.length === 0) {
-          content.innerHTML = `<div class="panel empty-state"><h3>All caught up</h3><p>No pending KYC verifications.</p></div>`;
-          return;
-        }
-        content.innerHTML = `<div class="card-list">${users.map(u => `
+        if (users.length === 0) { el.innerHTML = `<div class="panel empty-state"><p>No pending registrations.</p></div>`; return; }
+        el.innerHTML = `<div class="card-list">${users.map(u => `
           <div class="card-item">
             <div class="row-flex" style="justify-content:space-between;">
-              <strong>${u.full_name}</strong>
-              <span class="muted">${fmtDate(u.created_at)}</span>
+              <strong>${u.full_name}</strong><span class="muted">${fmtDate(u.created_at)}</span>
             </div>
             <div class="muted" style="margin:4px 0 10px;">${u.email} · ${u.phone}${u.national_id ? ' · ID ' + u.national_id : ''}</div>
             <div class="field-row">
-              <div>
-                <span class="muted" style="font-size:12px;">ID document</span>
-                <img src="${u.id_photo}" style="width:100%; border-radius:6px; margin-top:4px;" />
-              </div>
-              <div>
-                <span class="muted" style="font-size:12px;">Selfie</span>
-                <img src="${u.selfie_photo}" style="width:100%; border-radius:6px; margin-top:4px;" />
-              </div>
+              <div><span class="muted" style="font-size:12px;">ID document</span><img src="${u.id_photo}" style="width:100%; border-radius:6px; margin-top:4px;" /></div>
+              <div><span class="muted" style="font-size:12px;">Selfie</span><img src="${u.selfie_photo}" style="width:100%; border-radius:6px; margin-top:4px;" /></div>
             </div>
             <div class="row-flex" style="margin-top:14px;">
-              <button class="btn btn-primary" onclick="verifyUser(${u.id}, 'approved')">Approve</button>
-              <button class="btn btn-danger" onclick="verifyUser(${u.id}, 'rejected')">Reject</button>
+              <button class="btn btn-primary" onclick="verifyUser(${u.id}, 'approved', '${u.full_name.replace(/'/g,"")}', '${u.phone}')">Approve</button>
+              <button class="btn btn-danger" onclick="verifyUser(${u.id}, 'rejected', '${u.full_name.replace(/'/g,"")}', '${u.phone}')">Reject</button>
             </div>
-          </div>
-        `).join('')}</div>`;
-      } catch (err) {
-        content.innerHTML = `<div class="error-msg">${err.message}</div>`;
-      }
+          </div>`).join('')}</div>`;
+      } catch (err) { el.innerHTML = `<div class="error-msg">${err.message}</div>`; }
     }
 
-    async function verifyUser(id, decision) {
+    async function verifyUser(id, decision, name, phone) {
       let note = '';
-      if (decision === 'rejected') {
-        note = prompt('Reason for rejection:') || '';
-        if (!note) return;
-      }
-      try { await api(`/auth/users/${id}/verify`, { method: 'POST', body: { decision, note } }); loadVerifications(); loadStats(); }
-      catch (e) { alert(e.message); }
-    }
-
-    const LOAN_STATUS_TABS = [
-      { key: 'pending_level1', label: 'Level 1' },
-      { key: 'pending_level2', label: 'Level 2' },
-      { key: 'approved', label: 'To disburse' },
-      { key: 'disbursed', label: 'Active' },
-      { key: 'defaulted', label: 'Overdue' },
-      { key: 'repaid', label: 'Repaid' },
-      { key: 'rejected', label: 'Rejected' },
-      { key: '', label: 'All' },
-    ];
-
-    function renderLoanSubTabs() {
-      const subTabs = document.getElementById('subTabs');
-      subTabs.classList.remove('hidden');
-      subTabs.innerHTML = LOAN_STATUS_TABS.map(t =>
-        `<div class="tab ${t.key === currentLoanStatus ? 'active' : ''}" data-status="${t.key}">${t.label}</div>`
-      ).join('');
-    }
-
-    async function loadLoans() {
-      renderLoanSubTabs();
-      const content = document.getElementById('content');
-      content.innerHTML = '<p class="muted">Loading…</p>';
+      if (decision === 'rejected') { note = prompt('Reason for rejection:') || ''; if (!note) return; }
       try {
-        const qs = currentLoanStatus ? `?status=${currentLoanStatus}` : '';
-        const { loans } = await api(`/loans${qs}`);
-        if (loans.length === 0) {
-          content.innerHTML = `<div class="panel empty-state"><h3>Nothing here</h3><p>No loans match this filter.</p></div>`;
-          return;
-        }
-        content.innerHTML = `<div class="card-list">${loans.map(l => `
+        await api(`/auth/users/${id}/verify`, { method: 'POST', body: { decision, note } });
+        const msg = decision === 'approved'
+          ? `Dear ${name}, your Sasa Loan account has been verified. You can now log in and apply for a loan.`
+          : `Dear ${name}, we were unable to verify your Sasa Loan registration. Reason: ${note}. Please contact support.`;
+        if (confirm('Push a WhatsApp message about this decision now?')) await pushWhatsApp(phone, msg, null);
+        loadKyc(); loadStats();
+      } catch (e) { alert(e.message); }
+    }
+
+    async function loadPendingLoans() {
+      const el = document.getElementById('pendingLoansSection');
+      try {
+        const [l1, l2] = await Promise.all([api('/loans?status=pending_level1'), api('/loans?status=pending_level2')]);
+        const all = [...l1.loans.map(l => ({ ...l, stage: 'Level 1' })), ...l2.loans.map(l => ({ ...l, stage: 'Level 2' }))];
+        if (all.length === 0) { el.innerHTML = `<div class="panel empty-state"><p>Nothing awaiting review.</p></div>`; return; }
+        el.innerHTML = `<div class="card-list">${all.map(l => `
           <div class="card-item clickable" onclick="window.location.href='/loan.html?id=${l.id}'">
             <div class="row-flex" style="justify-content:space-between;">
               <strong>${l.full_name}</strong>
-              ${countdownPill(l.days_remaining, l.status)}
+              <span class="badge badge-pending">${l.stage}</span>
             </div>
-            <div class="muted" style="margin-top:4px; font-size:13px;">
-              KES ${money(l.amount)} · Guarantor: ${l.guarantor_name || '—'} · Applied ${fmtDate(l.created_at)}
-            </div>
-          </div>
-        `).join('')}</div>`;
-      } catch (err) {
-        content.innerHTML = `<div class="error-msg">${err.message}</div>`;
-      }
+            <div class="muted" style="margin-top:4px; font-size:13px;">KES ${money(l.amount)} · Guarantor: ${l.guarantor_name || '—'} · Applied ${fmtDate(l.created_at)}</div>
+          </div>`).join('')}</div>`;
+      } catch (err) { el.innerHTML = `<div class="error-msg">${err.message}</div>`; }
     }
 
     async function loadExtensions() {
-      document.getElementById('subTabs').classList.add('hidden');
-      const content = document.getElementById('content');
-      content.innerHTML = '<p class="muted">Loading…</p>';
+      const el = document.getElementById('extensionsSection');
       try {
         const { extensions } = await api('/loans/extensions/pending');
-        if (extensions.length === 0) {
-          content.innerHTML = `<div class="panel empty-state"><h3>No pending requests</h3><p>No extension requests need review.</p></div>`;
-          return;
-        }
-        content.innerHTML = `<div class="card-list">${extensions.map(e => `
+        if (extensions.length === 0) { el.innerHTML = `<div class="panel empty-state"><p>No pending extension requests.</p></div>`; return; }
+        el.innerHTML = `<div class="card-list">${extensions.map(e => `
           <div class="card-item">
-            <strong>${e.full_name}</strong> — Loan of KES ${money(e.amount)}, due ${e.due_date}
+            <strong>${e.full_name}</strong> — KES ${money(e.amount)}, due ${e.due_date}
             <p style="margin:8px 0;">${e.reason}</p>
             <div class="row-flex">
               <button class="btn btn-primary" onclick="reviewExt(${e.id}, 'approved')">Approve</button>
               <button class="btn btn-danger" onclick="reviewExt(${e.id}, 'rejected')">Reject</button>
               <a href="/loan.html?id=${e.loan_id}" class="btn btn-outline">View loan</a>
             </div>
-          </div>
-        `).join('')}</div>`;
-      } catch (err) {
-        content.innerHTML = `<div class="error-msg">${err.message}</div>`;
-      }
+          </div>`).join('')}</div>`;
+      } catch (err) { el.innerHTML = `<div class="error-msg">${err.message}</div>`; }
     }
-
     async function reviewExt(id, decision) {
       const note = prompt(`Note for ${decision === 'approved' ? 'approving' : 'rejecting'} (optional):`) || '';
       try { await api(`/loans/extensions/${id}/review`, { method: 'POST', body: { decision, note } }); loadExtensions(); loadStats(); }
       catch (e) { alert(e.message); }
     }
 
-    function switchView(view) {
-      currentView = view;
-      document.querySelectorAll('#mainTabs .tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
-      if (view === 'verifications') loadVerifications();
-      else if (view === 'loans') loadLoans();
-      else if (view === 'extensions') loadExtensions();
+    async function loadByStatus(status, elId) {
+      const el = document.getElementById(elId);
+      try {
+        const { loans } = await api(`/loans?status=${status}`);
+        if (loans.length === 0) { el.innerHTML = `<div class="panel empty-state"><p>None right now.</p></div>`; return; }
+        el.innerHTML = `<div class="card-list">${loans.map(l => `
+          <div class="card-item clickable" onclick="window.location.href='/loan.html?id=${l.id}'">
+            <div class="row-flex" style="justify-content:space-between;">
+              <strong>${l.full_name}</strong>
+              ${countdownPill(l.days_remaining, l.status)}
+            </div>
+            <div class="muted" style="margin-top:4px; font-size:13px;">KES ${money(l.amount)} · Due ${l.due_date}</div>
+          </div>`).join('')}</div>`;
+      } catch (err) { el.innerHTML = `<div class="error-msg">${err.message}</div>`; }
     }
 
-    document.getElementById('mainTabs').addEventListener('click', (e) => {
-      const tab = e.target.closest('.tab');
-      if (tab) switchView(tab.dataset.view);
-    });
-    document.getElementById('subTabs').addEventListener('click', (e) => {
-      const tab = e.target.closest('.tab');
-      if (!tab) return;
-      currentLoanStatus = tab.dataset.status;
-      loadLoans();
-    });
+    async function loadCashflow() {
+      if (!isAdminTier) return;
+      try {
+        const data = await api('/loans/stats/cashflow');
+        document.getElementById('cfOutstanding').textContent = 'KES ' + money(data.outstanding);
+        document.getElementById('cfOverdue').textContent = 'KES ' + money(data.overdueAmount);
+        document.getElementById('cfRepaid').textContent = 'KES ' + money(data.totalRepaidAllTime);
+
+        const ctx = document.getElementById('cashflowChart');
+        new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: data.trend.map(t => t.period),
+            datasets: [
+              { label: 'Disbursed', data: data.trend.map(t => t.disbursed), backgroundColor: '#1F3A5F' },
+              { label: 'Repaid', data: data.trend.map(t => t.repaid), backgroundColor: '#2E7D5B' },
+            ],
+          },
+          options: { responsive: true, scales: { y: { beginAtZero: true } } },
+        });
+      } catch (e) { /* non-fatal */ }
+    }
 
     loadStats();
-    switchView('verifications');
+    loadKyc();
+    loadPendingLoans();
+    loadExtensions();
+    loadByStatus('disbursed', 'activeSection');
+    loadByStatus('defaulted', 'overdueSection');
+    loadCashflow();
   </script>
 </body>
 </html>

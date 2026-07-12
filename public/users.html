@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Manage users — Sasa Loan</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Sasa <span class="mark">Loan</span></div>
+    <nav>
+      <span class="user-chip" id="userChip"></span>
+      <a href="/staff.html">Dashboard</a>
+      <a href="#" onclick="logout()">Sign out</a>
+    </nav>
+  </div>
+
+  <div class="wrap">
+    <h1>Manage users</h1>
+
+    <div class="panel" style="margin-bottom:24px;">
+      <h3 style="margin-top:0;">Create new account</h3>
+      <form id="createForm">
+        <div class="field-row">
+          <div>
+            <label for="full_name">Full name</label>
+            <input id="full_name" required />
+          </div>
+          <div>
+            <label for="email">Email</label>
+            <input id="email" type="email" required />
+          </div>
+        </div>
+        <div class="field-row">
+          <div>
+            <label for="phone">Phone (WhatsApp)</label>
+            <input id="phone" required />
+          </div>
+          <div>
+            <label for="temp_password">Temporary password</label>
+            <input id="temp_password" required minlength="6" />
+          </div>
+        </div>
+        <label>Roles (select one or more)</label>
+        <div class="row-flex" style="flex-wrap:wrap; margin-top:4px;">
+          <label style="display:inline-flex; align-items:center; gap:6px; font-weight:400; margin:0;">
+            <input type="checkbox" value="loan_officer" class="roleCheck" style="width:auto;" /> Loan Officer
+          </label>
+          <label style="display:inline-flex; align-items:center; gap:6px; font-weight:400; margin:0;">
+            <input type="checkbox" value="credit_manager" class="roleCheck" style="width:auto;" /> Credit Manager
+          </label>
+          <label style="display:inline-flex; align-items:center; gap:6px; font-weight:400; margin:0;">
+            <input type="checkbox" value="admin" class="roleCheck" style="width:auto;" /> Admin
+          </label>
+          <label style="display:inline-flex; align-items:center; gap:6px; font-weight:400; margin:0;">
+            <input type="checkbox" value="super_admin" class="roleCheck" style="width:auto;" /> Super Admin
+          </label>
+        </div>
+        <p class="muted" style="margin-top:6px; font-size:12px;">They'll be required to change this password the first time they sign in.</p>
+        <button class="btn btn-primary" type="submit" id="createBtn" style="margin-top:16px;">Create account</button>
+      </form>
+      <div id="createError" class="error-msg hidden"></div>
+      <div id="createSuccess" class="success-msg hidden"></div>
+    </div>
+
+    <h2 style="font-size:18px;">All staff accounts</h2>
+    <div id="userList"><p class="muted">Loading…</p></div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    const user = Auth.requireRole(['super_admin']);
+    if (user) document.getElementById('userChip').textContent = user.full_name;
+
+    const ROLE_LABELS = { super_admin: 'Super Admin', admin: 'Admin', loan_officer: 'Loan Officer', credit_manager: 'Credit Manager' };
+
+    async function loadUsers() {
+      const el = document.getElementById('userList');
+      try {
+        const { users } = await api('/users');
+        if (users.length === 0) { el.innerHTML = `<div class="panel empty-state"><p>No staff accounts yet.</p></div>`; return; }
+        el.innerHTML = `<div class="card-list">${users.map(u => `
+          <div class="card-item">
+            <div class="row-flex" style="justify-content:space-between; flex-wrap:wrap;">
+              <div>
+                <strong>${u.full_name}</strong> ${u.id === user.id ? '<span class="muted">(you)</span>' : ''}<br/>
+                <span class="muted" style="font-size:13px;">${u.email} · ${u.phone}</span>
+              </div>
+              <span class="badge ${u.status === 'active' ? 'badge-approved' : 'badge-rejected'}">${u.status}</span>
+            </div>
+            <div class="muted" style="margin:8px 0; font-size:13px;">
+              Roles: ${u.roles.map(r => ROLE_LABELS[r] || r).join(', ')}
+              ${u.must_change_password ? ' · <span style="color: var(--amber-dark);">Must change password</span>' : ''}
+            </div>
+            <div class="row-flex" style="flex-wrap:wrap;">
+              ${ROLE_CHECKBOX_ROW(u)}
+            </div>
+            <div class="row-flex" style="margin-top:10px;">
+              <button class="btn btn-outline" onclick="saveRoles(${u.id})">Save roles</button>
+              ${u.status === 'active'
+                ? `<button class="btn btn-danger" onclick="setStatus(${u.id}, 'suspended')" ${u.id === user.id ? 'disabled' : ''}>Suspend</button>`
+                : `<button class="btn btn-primary" onclick="setStatus(${u.id}, 'active')">Reactivate</button>`}
+            </div>
+          </div>
+        `).join('')}</div>`;
+      } catch (err) { el.innerHTML = `<div class="error-msg">${err.message}</div>`; }
+    }
+
+    function ROLE_CHECKBOX_ROW(u) {
+      return Object.entries(ROLE_LABELS).map(([val, label]) => `
+        <label style="display:inline-flex; align-items:center; gap:6px; font-weight:400; margin:0; font-size:13px;">
+          <input type="checkbox" value="${val}" data-user="${u.id}" class="editRole" style="width:auto;" ${u.roles.includes(val) ? 'checked' : ''} /> ${label}
+        </label>`).join('');
+    }
+
+    async function saveRoles(userId) {
+      const checks = document.querySelectorAll(`.editRole[data-user="${userId}"]:checked`);
+      const roles = Array.from(checks).map(c => c.value);
+      if (roles.length === 0) { alert('Select at least one role'); return; }
+      try { await api(`/users/${userId}/roles`, { method: 'PUT', body: { roles } }); loadUsers(); }
+      catch (e) { alert(e.message); }
+    }
+
+    async function setStatus(userId, status) {
+      if (status === 'suspended' && !confirm('Suspend this account? They will not be able to log in.')) return;
+      try { await api(`/users/${userId}/status`, { method: 'PUT', body: { status } }); loadUsers(); }
+      catch (e) { alert(e.message); }
+    }
+
+    document.getElementById('createForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('createBtn');
+      const errorBox = document.getElementById('createError');
+      const successBox = document.getElementById('createSuccess');
+      errorBox.classList.add('hidden');
+      successBox.classList.add('hidden');
+
+      const roles = Array.from(document.querySelectorAll('.roleCheck:checked')).map(c => c.value);
+      if (roles.length === 0) { errorBox.textContent = 'Select at least one role'; errorBox.classList.remove('hidden'); return; }
+
+      btn.disabled = true;
+      btn.textContent = 'Creating…';
+      try {
+        const body = {
+          full_name: document.getElementById('full_name').value.trim(),
+          email: document.getElementById('email').value.trim(),
+          phone: document.getElementById('phone').value.trim(),
+          temp_password: document.getElementById('temp_password').value,
+          roles,
+        };
+        await api('/users', { method: 'POST', body });
+        successBox.textContent = 'Account created.';
+        successBox.classList.remove('hidden');
+        document.getElementById('createForm').reset();
+        loadUsers();
+      } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Create account';
+      }
+    });
+
+    loadUsers();
+  </script>
+</body>
+</html>

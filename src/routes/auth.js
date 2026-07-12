@@ -2,14 +2,14 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../db');
-const { JWT_SECRET, requireAuth, requireRole } = require('../middleware/auth');
-const { sendWhatsApp } = require('../utils/whatsapp');
+const { JWT_SECRET, requireAuth, requireAnyRole, blockIfMustChangePassword } = require('../middleware/auth');
+const { ALL_STAFF_ROLES, parseRoles } = require('../utils/roles');
 
 const router = express.Router();
 
 function signToken(user) {
   return jwt.sign(
-    { id: user.id, role: user.role, email: user.email, full_name: user.full_name },
+    { id: user.id, roles: user.roles, email: user.email, full_name: user.full_name },
     JWT_SECRET,
     { expiresIn: '7d' }
   );
@@ -21,12 +21,14 @@ function publicUser(user) {
     full_name: user.full_name,
     email: user.email,
     phone: user.phone,
-    role: user.role,
+    roles: parseRoles(user.roles),
+    status: user.status,
     verification_status: user.verification_status,
+    must_change_password: !!user.must_change_password,
   };
 }
 
-// Borrower self-registration with KYC documents
+// Member self-registration with KYC documents
 router.post('/register', (req, res) => {
   const { full_name, email, phone, national_id, password, id_photo, selfie_photo } = req.body;
 
@@ -46,8 +48,8 @@ router.post('/register', (req, res) => {
   const hash = bcrypt.hashSync(password, 10);
   const info = db
     .prepare(
-      `INSERT INTO users (full_name, email, phone, national_id, password_hash, role, verification_status, id_photo, selfie_photo)
-       VALUES (?, ?, ?, ?, ?, 'borrower', 'pending', ?, ?)`
+      `INSERT INTO users (full_name, email, phone, national_id, password_hash, roles, verification_status, id_photo, selfie_photo)
+       VALUES (?, ?, ?, ?, ?, 'member', 'pending', ?, ?)`
     )
     .run(full_name, email.toLowerCase(), phone, national_id || null, hash, id_photo, selfie_photo);
 
@@ -56,15 +58,13 @@ router.post('/register', (req, res) => {
   res.status(201).json({ token, user: publicUser(user) });
 });
 
-// Login (borrower or staff) - borrowers can log in while pending, but are
-// restricted from applying for loans until verified (enforced in loans routes)
 router.post('/login', (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
 
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase());
   if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-  if (user.status === 'suspended') return res.status(403).json({ error: 'Account suspended' });
+  if (user.status === 'suspended') return res.status(403).json({ error: 'This account has been suspended' });
 
   const ok = bcrypt.compareSync(password, user.password_hash);
   if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
@@ -73,13 +73,11 @@ router.post('/login', (req, res) => {
   res.json({ token, user: publicUser(user) });
 });
 
-// Current user
 router.get('/me', requireAuth, (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   res.json({ user: publicUser(user) });
 });
 
-// Change password (any signed-in user)
 router.post('/change-password', requireAuth, (req, res) => {
   const { current_password, new_password } = req.body;
   if (!current_password || !new_password) {
@@ -95,44 +93,44 @@ router.post('/change-password', requireAuth, (req, res) => {
   }
 
   const hash = bcrypt.hashSync(new_password, 10);
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, user.id);
+  db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hash, user.id);
   res.json({ ok: true });
 });
 
-// List of other verified borrowers, for the guarantor dropdown when applying
-router.get('/verified-borrowers', requireAuth, requireRole('borrower'), (req, res) => {
+// List of other verified Members, for the guarantor dropdown when applying
+router.get('/verified-members', requireAuth, requireAnyRole('member'), (req, res) => {
   const rows = db
     .prepare(
       `SELECT id, full_name, phone FROM users
-       WHERE role = 'borrower' AND verification_status = 'approved' AND id != ?
+       WHERE roles = 'member' AND verification_status = 'approved' AND id != ?
        ORDER BY full_name ASC`
     )
     .all(req.user.id);
   res.json({ users: rows });
 });
 
-// --- Staff: KYC verification queue ---
+// --- KYC verification: any staff-side role can review ---
 
-router.get('/pending-verifications', requireAuth, requireRole('staff', 'admin'), (req, res) => {
+router.get('/pending-verifications', requireAuth, requireAnyRole(...ALL_STAFF_ROLES), blockIfMustChangePassword, (req, res) => {
   const rows = db
     .prepare(
       `SELECT id, full_name, email, phone, national_id, id_photo, selfie_photo, created_at
-       FROM users WHERE verification_status = 'pending' AND role = 'borrower'
+       FROM users WHERE verification_status = 'pending' AND roles = 'member'
        ORDER BY created_at ASC`
     )
     .all();
   res.json({ users: rows });
 });
 
-router.get('/users/:id', requireAuth, requireRole('staff', 'admin'), (req, res) => {
+router.get('/users/:id', requireAuth, requireAnyRole(...ALL_STAFF_ROLES), blockIfMustChangePassword, (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
   const { password_hash, ...safe } = user;
   res.json({ user: safe });
 });
 
-router.post('/users/:id/verify', requireAuth, requireRole('staff', 'admin'), async (req, res) => {
-  const { decision, note } = req.body; // decision: 'approved' | 'rejected'
+router.post('/users/:id/verify', requireAuth, requireAnyRole(...ALL_STAFF_ROLES), blockIfMustChangePassword, (req, res) => {
+  const { decision, note } = req.body;
   if (!['approved', 'rejected'].includes(decision)) {
     return res.status(400).json({ error: "decision must be 'approved' or 'rejected'" });
   }
@@ -145,18 +143,6 @@ router.post('/users/:id/verify', requireAuth, requireRole('staff', 'admin'), asy
   db.prepare(
     `UPDATE users SET verification_status = ?, verification_note = ?, verified_by = ?, verified_at = datetime('now') WHERE id = ?`
   ).run(decision, note || null, req.user.id, user.id);
-
-  if (decision === 'approved') {
-    await sendWhatsApp(
-      user.phone,
-      `Hi ${user.full_name}, your Sasa Loan account has been verified. You can now log in and apply for a loan.`
-    );
-  } else {
-    await sendWhatsApp(
-      user.phone,
-      `Hi ${user.full_name}, we were unable to verify your Sasa Loan registration. Reason: ${note || 'not specified'}. Please contact support.`
-    );
-  }
 
   const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
   const { password_hash, ...safe } = updated;

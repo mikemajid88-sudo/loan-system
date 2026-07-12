@@ -22,7 +22,7 @@
 
   <script src="/js/api.js"></script>
   <script>
-    const user = Auth.requireRole(['borrower']);
+    const user = Auth.requireRole(['member']);
 
     async function load() {
       const content = document.getElementById('content');

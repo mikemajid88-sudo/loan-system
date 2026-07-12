@@ -11,7 +11,7 @@ function daysBetween(a, b) {
 
 /**
  * Runs once per invocation:
- * - Sends a WhatsApp reminder to borrowers whose loan is due in 3, 2, 1, or 0 days
+ * - Sends a WhatsApp reminder to members whose loan is due in 3, 2, 1, or 0 days
  *   (max once per day per loan, tracked via last_whatsapp_reminder_date).
  * - Marks any disbursed loan whose due date has passed as 'defaulted'.
  */

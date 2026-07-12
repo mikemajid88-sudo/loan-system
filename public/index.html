@@ -12,7 +12,7 @@
       <div class="panel">
         <div class="eyebrow">Sasa Loan</div>
         <h1 style="margin-top:0;">Sign in</h1>
-        <p class="muted">Borrowers and staff both sign in here.</p>
+        <p class="muted">Members and staff both sign in here.</p>
 
         <form id="loginForm">
           <label for="email">Email</label>
@@ -27,7 +27,7 @@
         <div id="errorBox" class="error-msg hidden"></div>
 
         <p class="muted" style="margin-top:20px;">
-          New borrower? <a href="/register.html">Create an account</a>
+          New here? <a href="/register.html">Create a member account</a>
         </p>
       </div>
     </div>
@@ -35,6 +35,15 @@
 
   <script src="/js/api.js"></script>
   <script>
+    function routeAfterLogin(user) {
+      if (user.must_change_password) { window.location.href = '/account.html?forced=1'; return; }
+      if (Auth.hasAnyRole(user, ['member'])) {
+        window.location.href = user.verification_status === 'approved' ? '/dashboard.html' : '/pending.html';
+      } else {
+        window.location.href = '/staff.html';
+      }
+    }
+
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = document.getElementById('submitBtn');
@@ -48,11 +57,7 @@
         const password = document.getElementById('password').value;
         const data = await api('/auth/login', { method: 'POST', body: { email, password } });
         Auth.setSession(data.token, data.user);
-        if (data.user.role === 'borrower') {
-          window.location.href = data.user.verification_status === 'approved' ? '/dashboard.html' : '/pending.html';
-        } else {
-          window.location.href = '/staff.html';
-        }
+        routeAfterLogin(data.user);
       } catch (err) {
         errorBox.textContent = err.message;
         errorBox.classList.remove('hidden');
@@ -61,16 +66,9 @@
       }
     });
 
-    // If already logged in, skip straight to the right place
     (function () {
       const user = Auth.getUser();
-      if (user && Auth.getToken()) {
-        if (user.role === 'borrower') {
-          window.location.href = user.verification_status === 'approved' ? '/dashboard.html' : '/pending.html';
-        } else {
-          window.location.href = '/staff.html';
-        }
-      }
+      if (user && Auth.getToken()) routeAfterLogin(user);
     })();
   </script>
 </body>

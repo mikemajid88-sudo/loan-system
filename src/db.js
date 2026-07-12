@@ -17,14 +17,18 @@ CREATE TABLE IF NOT EXISTS users (
   phone TEXT NOT NULL,
   national_id TEXT,
   password_hash TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'borrower' CHECK(role IN ('borrower','staff','admin')),
+  -- Comma-separated list of roles. A Member is always exactly 'member'.
+  -- Staff-side accounts hold one or more of: super_admin, admin, loan_officer, credit_manager
+  roles TEXT NOT NULL DEFAULT 'member',
   status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','suspended')),
+  must_change_password INTEGER NOT NULL DEFAULT 0,
   verification_status TEXT NOT NULL DEFAULT 'pending' CHECK(verification_status IN ('pending','approved','rejected')),
   verification_note TEXT,
   id_photo TEXT,
   selfie_photo TEXT,
   verified_by INTEGER REFERENCES users(id),
   verified_at TEXT,
+  created_by INTEGER REFERENCES users(id),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

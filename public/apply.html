@@ -47,7 +47,7 @@
 
   <script src="/js/api.js"></script>
   <script>
-    const user = Auth.requireRole(['borrower']);
+    const user = Auth.requireRole(['member']);
     if (user) document.getElementById('userChip').textContent = user.full_name;
 
     const amountEl = document.getElementById('amount');
@@ -72,7 +72,7 @@
       } catch (e) { /* fall back to defaults already in the label */ }
 
       try {
-        const { users } = await api('/auth/verified-borrowers');
+        const { users } = await api('/auth/verified-members');
         const select = document.getElementById('guarantor_id');
         if (users.length === 0) {
           select.innerHTML = `<option value="">No other verified users yet</option>`;
@@ -134,7 +134,7 @@
         };
         if (!body.guarantor_id) throw new Error('Please select a guarantor');
         const data = await api('/loans/apply', { method: 'POST', body });
-        successBox.textContent = 'Application submitted. Your guarantor will be notified on WhatsApp. Redirecting…';
+        successBox.textContent = 'Application submitted. Your guarantor can now see and approve it in their dashboard.';
         successBox.classList.remove('hidden');
         setTimeout(() => { window.location.href = `/loan.html?id=${data.loan.id}`; }, 1200);
       } catch (err) {
