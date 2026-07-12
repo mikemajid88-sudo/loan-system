@@ -3,22 +3,25 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>My loans — Northgate Loans</title>
+<title>My loans — Sasa Loan</title>
 <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
   <div class="topbar">
-    <div class="brand">Northgate <span class="mark">Loans</span></div>
+    <div class="brand">Sasa <span class="mark">Loan</span></div>
     <nav>
       <span class="user-chip" id="userChip"></span>
+      <a href="/account.html">Account</a>
       <a href="#" onclick="logout()">Sign out</a>
     </nav>
   </div>
 
   <div class="wrap">
-    <div class="row-flex" style="justify-content: space-between; margin-bottom: 24px;">
+    <div id="guarantorSection"></div>
+
+    <div class="row-flex" style="justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap:10px;">
       <h1 style="margin:0;">My loans</h1>
-      <a href="/apply.html" class="btn btn-amber" id="applyBtn">Apply for a loan</a>
+      <a href="/apply.html" class="btn btn-amber hidden" id="applyBtn">Apply for a loan</a>
     </div>
 
     <div id="content">
@@ -31,14 +34,60 @@
     const user = Auth.requireRole(['borrower']);
     if (user) document.getElementById('userChip').textContent = user.full_name;
 
+    function statusLabel(l) {
+      const map = {
+        awaiting_guarantor: 'Awaiting guarantor',
+        pending_level1: 'Under review (1/2)',
+        pending_level2: 'Under review (2/2)',
+        approved: 'Approved — awaiting disbursement',
+        rejected: 'Rejected',
+        disbursed: 'Active',
+        repaid: 'Repaid',
+        defaulted: 'Overdue',
+      };
+      return map[l.status] || l.status;
+    }
+
+    async function loadGuarantorRequests() {
+      const section = document.getElementById('guarantorSection');
+      try {
+        const { requests } = await api('/loans/guarantor-requests');
+        if (requests.length === 0) { section.innerHTML = ''; return; }
+        section.innerHTML = `
+          <div class="panel" style="margin-bottom:24px; border-color: var(--amber);">
+            <h3 style="margin-top:0;">Guarantor requests awaiting your response</h3>
+            <div class="card-list">
+              ${requests.map(r => `
+                <div class="card-item">
+                  <strong>${r.applicant_name}</strong> wants you as guarantor for a loan of KES ${money(r.amount)}
+                  (repayable KES ${money(r.total_repayable)} by ${r.due_date}).
+                  <div class="row-flex" style="margin-top:10px;">
+                    <button class="btn btn-primary" onclick="respond(${r.id}, 'approved')">Approve</button>
+                    <button class="btn btn-outline" onclick="respond(${r.id}, 'declined')">Decline</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>`;
+      } catch (e) { /* non-fatal */ }
+    }
+
+    async function respond(loanId, decision) {
+      if (decision === 'declined' && !confirm('Decline this guarantor request?')) return;
+      try {
+        await api(`/loans/${loanId}/guarantor-respond`, { method: 'POST', body: { decision } });
+        loadGuarantorRequests();
+      } catch (e) { alert(e.message); }
+    }
+
     async function load() {
       const content = document.getElementById('content');
       try {
         const { loans } = await api('/loans/my');
         const applyBtn = document.getElementById('applyBtn');
-        const hasOpen = loans.some(l => ['pending', 'under_review', 'approved'].includes(l.status));
-        if (hasOpen) {
-          applyBtn.classList.add('hidden');
+        const hasOpen = loans.some(l => !['rejected', 'repaid'].includes(l.status));
+        if (!hasOpen && user.verification_status === 'approved') {
+          applyBtn.classList.remove('hidden');
         }
 
         if (loans.length === 0) {
@@ -46,35 +95,30 @@
             <div class="panel empty-state">
               <h3>No loans yet</h3>
               <p>Apply for your first loan to get started.</p>
-              <a href="/apply.html" class="btn btn-primary">Apply for a loan</a>
             </div>`;
           return;
         }
 
         content.innerHTML = `
-          <div class="panel" style="padding:0;">
-            <table>
-              <thead>
-                <tr><th>Applied</th><th>Amount</th><th>Term</th><th>Monthly</th><th>Status</th><th></th></tr>
-              </thead>
-              <tbody>
-                ${loans.map(l => `
-                  <tr class="clickable" onclick="window.location.href='/loan.html?id=${l.id}'">
-                    <td>${fmtDate(l.created_at)}</td>
-                    <td>KES ${money(l.amount)}</td>
-                    <td>${l.term_months} mo</td>
-                    <td>KES ${money(l.monthly_payment)}</td>
-                    <td>${badge(l.status)}</td>
-                    <td><a href="/loan.html?id=${l.id}">View →</a></td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
+          <div class="card-list">
+            ${loans.map(l => `
+              <div class="card-item clickable" onclick="window.location.href='/loan.html?id=${l.id}'">
+                <div class="row-flex" style="justify-content:space-between;">
+                  <strong>KES ${money(l.amount)}</strong>
+                  ${countdownPill(l.days_remaining, l.status)}
+                </div>
+                <div class="muted" style="margin-top:6px; font-size:13px;">
+                  ${statusLabel(l)} · Applied ${fmtDate(l.created_at)}
+                </div>
+                ${l.status === 'disbursed' || l.status === 'defaulted' ? `<div style="margin-top:6px; font-size:13px;">Due ${l.due_date} · Repay KES ${money(l.total_repayable)}</div>` : ''}
+              </div>
+            `).join('')}
           </div>`;
       } catch (err) {
         content.innerHTML = `<div class="error-msg">${err.message}</div>`;
       }
     }
+    loadGuarantorRequests();
     load();
   </script>
 </body>

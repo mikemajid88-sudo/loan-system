@@ -25,4 +25,14 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { requireAuth, requireRole, JWT_SECRET };
+function requireVerified(req, res, next) {
+  if (req.user.role !== 'borrower') return next(); // staff/admin bypass
+  const db = require('../db');
+  const user = db.prepare('SELECT verification_status FROM users WHERE id = ?').get(req.user.id);
+  if (!user || user.verification_status !== 'approved') {
+    return res.status(403).json({ error: 'Your account is not yet verified. Please wait for staff approval.' });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireRole, requireVerified, JWT_SECRET };

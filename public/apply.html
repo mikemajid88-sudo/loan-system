@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Apply for a loan — Northgate Loans</title>
+<title>Apply for a loan — Sasa Loan</title>
 <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
   <div class="topbar">
-    <div class="brand">Northgate <span class="mark">Loans</span></div>
+    <div class="brand">Sasa <span class="mark">Loan</span></div>
     <nav>
       <span class="user-chip" id="userChip"></span>
       <a href="/dashboard.html">My loans</a>
@@ -20,14 +20,21 @@
     <h1>Apply for a loan</h1>
     <div class="panel">
       <form id="applyForm">
-        <label for="amount">Loan amount (KES)</label>
-        <input id="amount" type="number" min="1000" step="100" required />
+        <label for="amount" id="amountLabel">Loan amount (KES)</label>
+        <input id="amount" type="number" step="100" required />
 
-        <label for="term_months">Repayment term (months)</label>
-        <input id="term_months" type="number" min="1" max="60" required />
+        <label for="guarantor_id">Guarantor</label>
+        <select id="guarantor_id" required>
+          <option value="">Loading…</option>
+        </select>
+        <p class="muted" style="margin-top:4px; font-size:12px;">Your guarantor must log in and approve before your application moves forward.</p>
+
+        <label for="disbursement_date">When do you want the money?</label>
+        <input id="disbursement_date" type="date" required />
+        <p class="muted" style="margin-top:4px; font-size:12px;" id="dueDateHint"></p>
 
         <label for="purpose">Purpose of loan</label>
-        <textarea id="purpose" placeholder="e.g. School fees, stock for my shop, medical bill…"></textarea>
+        <textarea id="purpose" placeholder="e.g. Stock for my shop, school fees, medical bill…"></textarea>
 
         <div id="calcPreview" class="hidden" style="margin-top:18px; padding:14px; background:#F0F3F7; border-radius:6px; font-size:14px;"></div>
 
@@ -44,9 +51,50 @@
     if (user) document.getElementById('userChip').textContent = user.full_name;
 
     const amountEl = document.getElementById('amount');
-    const termEl = document.getElementById('term_months');
+    const dateEl = document.getElementById('disbursement_date');
     const preview = document.getElementById('calcPreview');
     let calcTimer;
+    let termDays = 30;
+
+    // Minimum disbursement date is today
+    const todayStr = new Date().toISOString().slice(0, 10);
+    dateEl.min = todayStr;
+    dateEl.value = todayStr;
+
+    async function init() {
+      try {
+        const settings = await getSettings();
+        termDays = Number(settings.loan_term_days || 30);
+        document.getElementById('amountLabel').textContent =
+          `Loan amount (KES ${Number(settings.min_loan_amount).toLocaleString()} - ${Number(settings.max_loan_amount).toLocaleString()})`;
+        amountEl.min = settings.min_loan_amount;
+        amountEl.max = settings.max_loan_amount;
+      } catch (e) { /* fall back to defaults already in the label */ }
+
+      try {
+        const { users } = await api('/auth/verified-borrowers');
+        const select = document.getElementById('guarantor_id');
+        if (users.length === 0) {
+          select.innerHTML = `<option value="">No other verified users yet</option>`;
+        } else {
+          select.innerHTML = `<option value="">Select a guarantor…</option>` +
+            users.map(u => `<option value="${u.id}">${u.full_name} (${u.phone})</option>`).join('');
+        }
+      } catch (e) {
+        document.getElementById('guarantor_id').innerHTML = `<option value="">Could not load users</option>`;
+      }
+
+      updateDueHint();
+    }
+
+    function updateDueHint() {
+      if (!dateEl.value) return;
+      const d = new Date(dateEl.value + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() + termDays);
+      document.getElementById('dueDateHint').textContent =
+        `Your loan will be due in full on ${d.toISOString().slice(0, 10)} (${termDays} days from disbursement).`;
+    }
+    dateEl.addEventListener('change', updateDueHint);
 
     function scheduleCalc() {
       clearTimeout(calcTimer);
@@ -54,20 +102,18 @@
     }
     async function runCalc() {
       const amount = Number(amountEl.value);
-      const term_months = Number(termEl.value);
-      if (!amount || !term_months) { preview.classList.add('hidden'); return; }
+      if (!amount) { preview.classList.add('hidden'); return; }
       try {
-        const calc = await api('/loans/calculate', { method: 'POST', body: { amount, term_months } });
+        const calc = await api(`/loans/calculate?amount=${amount}`);
         preview.classList.remove('hidden');
         preview.innerHTML = `
-          <strong>Estimated repayment</strong> (at ${calc.interest_rate}% p.a.)<br/>
-          Monthly payment: <strong>KES ${money(calc.monthlyPayment)}</strong><br/>
-          Total repayable: KES ${money(calc.totalRepayable)} (interest: KES ${money(calc.totalInterest)})
+          <strong>Estimated repayment</strong> (${calc.interest_rate}% flat over ${calc.term_days} days)<br/>
+          Interest: KES ${money(calc.interest)}<br/>
+          Total repayable: <strong>KES ${money(calc.totalRepayable)}</strong>
         `;
       } catch (e) { /* ignore preview errors */ }
     }
     amountEl.addEventListener('input', scheduleCalc);
-    termEl.addEventListener('input', scheduleCalc);
 
     document.getElementById('applyForm').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -82,13 +128,15 @@
       try {
         const body = {
           amount: Number(amountEl.value),
-          term_months: Number(termEl.value),
+          guarantor_id: Number(document.getElementById('guarantor_id').value),
+          disbursement_date: dateEl.value,
           purpose: document.getElementById('purpose').value.trim(),
         };
+        if (!body.guarantor_id) throw new Error('Please select a guarantor');
         const data = await api('/loans/apply', { method: 'POST', body });
-        successBox.textContent = 'Application submitted. Redirecting…';
+        successBox.textContent = 'Application submitted. Your guarantor will be notified on WhatsApp. Redirecting…';
         successBox.classList.remove('hidden');
-        setTimeout(() => { window.location.href = `/loan.html?id=${data.loan.id}`; }, 900);
+        setTimeout(() => { window.location.href = `/loan.html?id=${data.loan.id}`; }, 1200);
       } catch (err) {
         errorBox.textContent = err.message;
         errorBox.classList.remove('hidden');
@@ -96,6 +144,8 @@
         btn.textContent = 'Submit application';
       }
     });
+
+    init();
   </script>
 </body>
 </html>

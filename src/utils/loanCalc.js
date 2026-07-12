@@ -1,25 +1,28 @@
 /**
- * Simple flat-rate loan calculation.
- * interestRate is an ANNUAL percentage (e.g. 12 means 12%/year).
+ * Sasa Loan uses a flat interest rate on a fixed term (default 30 days).
+ * interestRate is a percentage applied once over the whole term (not annualized).
  */
-function calculateLoan(amount, termMonths, interestRatePct) {
+function calculateLoan(amount, interestRatePct) {
   const principal = Number(amount);
-  const months = Number(termMonths);
-  const annualRate = Number(interestRatePct) / 100;
+  const rate = Number(interestRatePct) / 100;
 
-  const totalInterest = principal * annualRate * (months / 12);
-  const totalRepayable = principal + totalInterest;
-  const monthlyPayment = totalRepayable / months;
+  const interest = principal * rate;
+  const totalRepayable = principal + interest;
 
   return {
-    totalInterest: round2(totalInterest),
+    interest: round2(interest),
     totalRepayable: round2(totalRepayable),
-    monthlyPayment: round2(monthlyPayment),
   };
+}
+
+function addDays(dateStr, days) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
-module.exports = { calculateLoan };
+module.exports = { calculateLoan, addDays };

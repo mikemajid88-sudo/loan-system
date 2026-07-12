@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Sign in — Northgate Loans</title>
+<title>Sign in — Sasa Loan</title>
 <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
   <div class="center-page">
     <div class="wrap narrow">
       <div class="panel">
-        <div class="eyebrow">Northgate Loans</div>
+        <div class="eyebrow">Sasa Loan</div>
         <h1 style="margin-top:0;">Sign in</h1>
         <p class="muted">Borrowers and staff both sign in here.</p>
 
@@ -48,7 +48,11 @@
         const password = document.getElementById('password').value;
         const data = await api('/auth/login', { method: 'POST', body: { email, password } });
         Auth.setSession(data.token, data.user);
-        window.location.href = data.user.role === 'borrower' ? '/dashboard.html' : '/staff.html';
+        if (data.user.role === 'borrower') {
+          window.location.href = data.user.verification_status === 'approved' ? '/dashboard.html' : '/pending.html';
+        } else {
+          window.location.href = '/staff.html';
+        }
       } catch (err) {
         errorBox.textContent = err.message;
         errorBox.classList.remove('hidden');
@@ -57,11 +61,15 @@
       }
     });
 
-    // If already logged in, skip straight to the right dashboard
+    // If already logged in, skip straight to the right place
     (function () {
       const user = Auth.getUser();
       if (user && Auth.getToken()) {
-        window.location.href = user.role === 'borrower' ? '/dashboard.html' : '/staff.html';
+        if (user.role === 'borrower') {
+          window.location.href = user.verification_status === 'approved' ? '/dashboard.html' : '/pending.html';
+        } else {
+          window.location.href = '/staff.html';
+        }
       }
     })();
   </script>

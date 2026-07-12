@@ -1,25 +1,67 @@
-# Northgate Loans — Loan Management System
+# Sasa Loan — Loan Management System
 
-A simple, fast loan management system for up to ~500 borrowers. Borrowers
-register and apply for loans; staff review (vet), approve, or reject
-applications; approved loans can be marked as disbursed.
+A mobile-first micro-lending platform for up to ~500 borrowers: KYC-verified
+registration, guarantor-backed loans, 2-level maker-checker approval,
+30-day fixed-term loans, WhatsApp notifications, and self-service
+extension requests.
 
 Built with Node.js + Express + SQLite (one file, no database server to
-install or manage) and a plain HTML/CSS/JS frontend (no build step).
+manage) and a plain HTML/CSS/JS frontend (no build step).
 
-## Features
+## How it works
 
-- Borrower self-registration and login
-- Loan application with live repayment calculation (flat annual interest)
-- One open application per borrower at a time (configurable)
-- Staff queue: pending → under review → approved/rejected → disbursed
-- Full audit trail (loan_events table) for every action taken on a loan
-- Staff dashboard with summary stats
-- Role-based access (borrower / staff / admin) enforced on every API route
+**Registration & KYC**
+- Borrower registers with name, WhatsApp phone number, email, password
+- Captures a live photo of their ID and a live selfie using their device
+  camera (not gallery upload) — requires HTTPS or localhost + camera
+  permission
+- Account sits as `pending` until staff review the documents
+- Staff approve or reject from the **Verifications** tab in the staff
+  dashboard; the applicant gets a WhatsApp message either way
+
+**Applying for a loan** (once verified)
+- Pick an amount (admin-configurable min/max, default KES 2,000–15,000)
+- Pick a **guarantor** from a dropdown of other verified users — the
+  guarantor must log in and actively approve before the loan proceeds
+- Pick a disbursement date; the due date is fixed at 30 days later
+  (admin-configurable) and isn't user-selectable
+- Interest is a flat rate applied once over the term (default 12%,
+  admin-configurable)
+
+**Approval — enforced 2-level maker-checker, then disbursement**
+1. **Level 1** review by any staff member
+2. **Level 2** approval — must be a *different* staff member than Level 1
+   (the system blocks the same person from doing both)
+3. **Disbursement**, marked by staff once money has actually gone out
+
+**Reminders**
+- Borrowers see a live countdown pill on their loan (color-coded: green →
+  amber at 7 days → red at 3 days/overdue)
+- A background job checks every hour and sends WhatsApp reminders daily
+  from 3 days before the due date through the due date itself (deduped
+  so it only sends once per day per loan)
+- Loans past their due date are automatically marked `defaulted`
+
+**Extensions**
+- Once disbursed (including if overdue), a borrower can submit a written
+  extension request
+- Staff approve or reject it
+- On approval: the current outstanding total becomes the new principal,
+  fresh interest is applied for another full term, and the due date
+  moves forward — no separate penalty, exactly one more 30-day cycle.
+  Can be requested again afterward if needed, each time requiring staff
+  approval.
+
+**Admin settings**
+- Admins can change minimum/maximum loan amount, interest rate, and loan
+  term length at `/settings.html` — takes effect for new applications
+  immediately; existing loans keep their original terms.
 
 ## Requirements
 
 - Node.js 18 or later
+- HTTPS in production (required for camera access on phones) — Render,
+  Railway, etc. provide this automatically
 
 ## 1. Install
 
@@ -34,37 +76,30 @@ npm install
 cp .env.example .env
 ```
 
-Open `.env` and set a long random `JWT_SECRET` (used to sign login
-tokens). Adjust `DEFAULT_INTEREST_RATE`, `MIN_LOAN_AMOUNT`, and
-`MAX_LOAN_AMOUNT` if needed.
+Set a long random `JWT_SECRET`. See the WhatsApp section below for the
+optional messaging setup.
 
 ## 3. First login
 
-The app automatically creates a default admin account the very first time
-it starts, if no staff/admin account exists yet:
+The app automatically creates a default admin account the first time it
+starts, if no staff/admin account exists yet:
 
 ```
 Email:    admin@example.com
 Password: ChangeMe123!
 ```
 
-Sign in with these, then **immediately go to Account → Change password**
-in the top menu to set your own password. This default account is only
-ever created once — after that first login it behaves like any other
-admin account.
+Sign in, then go to **Account → Change password** immediately.
 
-Want a different default instead of typing your own password every time?
-Set `DEFAULT_ADMIN_EMAIL` and `DEFAULT_ADMIN_PASSWORD` in your `.env`
-before first startup and those will be used instead.
-
-**Adding more staff later:** once you're signed in as admin, create
-additional staff accounts from the command line (borrowers can't grant
-themselves staff access — only admins can create staff/admin accounts,
-deliberately kept out of the public website):
+**Adding more staff:** borrowers can't grant themselves staff access —
+only via this CLI script (run on the server):
 
 ```bash
-node create-staff.js "Jane Doe" jane@example.com "a-strong-password" staff
+node create-staff.js "Jane Doe" jane@example.com 0712345678 "a-strong-password" staff
 ```
+
+You'll want **at least 2 staff accounts** in practice, since Level 1 and
+Level 2 loan approval must be done by different people.
 
 ## 4. Run it
 
@@ -74,91 +109,82 @@ npm start
 
 Visit **http://localhost:3000**
 
-- Borrowers sign up at `/register.html`
-- Everyone signs in at `/` (the login page)
-- Staff/admin land on the staff dashboard; borrowers land on their own
-  loan list
+## WhatsApp messaging (optional but recommended)
 
-For local development with auto-restart on file changes: `npm run dev`
+Without setup, the app still works fully — WhatsApp messages are just
+logged to the console and to a `whatsapp_log` table instead of actually
+sending. To enable real sending, at **zero cost** (Meta's direct API has
+a free tier, no Twilio markup):
 
-## How the loan workflow works
+1. Create a free Meta Business account at https://business.facebook.com
+2. Go to https://developers.facebook.com, create an app, add the
+   **WhatsApp** product
+3. Under WhatsApp → API Setup, note your **Phone Number ID** and generate
+   a permanent **Access Token**
+4. Add both to your `.env`:
+   ```
+   WHATSAPP_PHONE_NUMBER_ID=your-id-here
+   WHATSAPP_ACCESS_TOKEN=your-token-here
+   ```
+5. Restart the app — messages will now actually send
 
-1. **Apply** — a borrower submits amount, term, and purpose. The system
-   calculates a monthly payment automatically. Status: `pending`.
-2. **Vet** — staff review the application and can add a note and move it
-   to `under_review` (optional step — staff can also approve/reject
-   directly from `pending`).
-3. **Approve / Reject** — staff make the decision, with a required reason
-   when rejecting.
-4. **Disburse** — once approved, staff mark the loan `disbursed` when the
-   money has actually gone out.
-
-Every transition is recorded in `loan_events` with who did it and when, so
-you always have a full history per loan.
+The phone-number normalization in `src/utils/whatsapp.js` defaults to
+Kenya's country code (254) for numbers starting with `0`. Adjust that if
+your borrowers are in a different country.
 
 ## Data storage
 
-All data lives in a single SQLite file at `data/loans.db`, created
-automatically the first time you run the server. To back up your data,
-just copy that file. There is nothing else to configure — no separate
-database server.
+Everything — including uploaded ID photos and selfies (stored as
+compressed base64 images) — lives in one SQLite file at `data/loans.db`.
+Back up by copying that file.
 
-## Deploying so multiple staff can access it online
+## Deploying
 
-Since this is a single Node process with a SQLite file, the simplest
-deployment path is a small always-on server:
+See the earlier deployment notes for Render/Railway — same process,
+no code changes needed. Two things specific to this version:
 
-- **Railway / Render / Fly.io** — connect your git repo, set the
-  `JWT_SECRET` env var, and deploy. Attach a persistent volume mounted at
-  `data/` so the SQLite file survives restarts/redeploys (all three
-  platforms support this).
-- **A cheap VPS (DigitalOcean, Linode, etc.)** — install Node, copy the
-  project over, run `npm install --production`, then run it under a
-  process manager like `pm2` so it restarts automatically:
-  ```bash
-  npm install -g pm2
-  pm2 start server.js --name loan-system
-  pm2 save
-  ```
-  Put it behind Nginx with a free Let's Encrypt SSL certificate for HTTPS.
-
-At 500 users this app will comfortably run on the smallest tier of any of
-the above (512MB RAM is plenty).
-
-## Growing beyond this
-
-If you eventually outgrow SQLite (many concurrent staff, very high
-volume, need for automated backups/replication), the `better-sqlite3`
-calls are isolated in `src/db.js` and the route files — swapping to
-Postgres later means rewriting those queries, not the rest of the app.
+- **HTTPS is required** for the camera capture on registration to work
+  on phones (browsers block camera access on plain HTTP except
+  localhost). Render/Railway give you HTTPS automatically.
+- **Persistent disk matters even more now** — the database holds real ID
+  documents, not just loan records. Recommend the paid tier with a
+  persistent disk for anything beyond testing.
 
 ## Project structure
 
 ```
 loan-system/
-  server.js              Express app entry point
-  create-staff.js         CLI to create staff/admin accounts
+  server.js                Express app entry point + reminder scheduler startup
+  create-staff.js           CLI to create staff/admin accounts
   src/
-    db.js                 SQLite connection + schema
-    middleware/auth.js     JWT auth + role checks
-    routes/auth.js         register, login, /me
-    routes/loans.js        apply, list, vet, approve, reject, disburse, stats
-    utils/loanCalc.js      flat-rate repayment calculation
-  public/                 Frontend (plain HTML/CSS/JS, no build step)
-    index.html             Sign in
-    register.html          Borrower sign up
-    dashboard.html          Borrower: my loans
-    apply.html              Borrower: loan application form
-    staff.html              Staff: queue + stats
-    loan.html               Shared loan detail + staff actions
-  data/loans.db           SQLite database (created on first run)
+    db.js                   SQLite connection + schema (users, loans, extensions, settings, whatsapp_log)
+    seed.js                 Creates default admin account on first run
+    middleware/auth.js       JWT auth + role + verification checks
+    routes/auth.js           register, login, KYC verification queue, guarantor list
+    routes/loans.js          apply, guarantor response, level1/level2, disburse, repay, extensions
+    routes/settings.js       admin-editable loan parameters
+    utils/loanCalc.js        flat-rate repayment calculation
+    utils/settings.js        settings read/write helpers
+    utils/whatsapp.js        Meta Cloud API integration (stubbed until configured)
+    utils/reminders.js       hourly sweep: due-date WhatsApp reminders + auto-default
+  public/                  Frontend (plain HTML/CSS/JS, mobile-first, no build step)
+    index.html               Sign in
+    register.html            Borrower sign up with live camera capture
+    pending.html             Shown to borrowers awaiting KYC approval
+    dashboard.html           Borrower: my loans + guarantor requests
+    apply.html               Borrower: loan application with guarantor + date picker
+    staff.html               Staff: verification queue, loan queues, extension requests
+    settings.html            Admin: editable loan amount/rate/term settings
+    loan.html                Shared loan detail + all staff/guarantor/borrower actions
+    account.html             Change password
+    js/camera.js             Reusable live camera capture helper
+  data/loans.db             SQLite database (created on first run)
 ```
 
 ## Security notes before going live
 
-- Set a real, random `JWT_SECRET` in `.env` — don't use the example value.
-- Serve over HTTPS in production (see deployment section).
-- Consider adding rate limiting on `/api/auth/login` and
-  `/api/auth/register` if this will be public on the internet.
-- Back up `data/loans.db` regularly (it's a single file, so this is easy —
-  even a nightly `cp` to another location is a good start).
+- Set a real, random `JWT_SECRET` in `.env`
+- Serve over HTTPS in production (required for camera access anyway)
+- Consider rate limiting `/api/auth/login` and `/api/auth/register`
+- Back up `data/loans.db` regularly — it now contains ID documents, so
+  treat it as sensitive data

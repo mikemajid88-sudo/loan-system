@@ -5,7 +5,9 @@ const cors = require('cors');
 
 const authRoutes = require('./src/routes/auth');
 const loanRoutes = require('./src/routes/loans');
+const settingsRoutes = require('./src/routes/settings');
 const { ensureDefaultAdmin } = require('./src/seed');
+const { startReminderScheduler } = require('./src/utils/reminders');
 
 ensureDefaultAdmin();
 
@@ -13,14 +15,17 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
+// Higher limit than default, to allow base64-encoded ID photo + selfie uploads
+app.use(express.json({ limit: '15mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/loans', loanRoutes);
+app.use('/api/settings', settingsRoutes);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 app.listen(PORT, () => {
-  console.log(`Loan management system running at http://localhost:${PORT}`);
+  console.log(`Sasa Loan running at http://localhost:${PORT}`);
+  startReminderScheduler();
 });

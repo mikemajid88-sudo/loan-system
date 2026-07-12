@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Create account — Northgate Loans</title>
+<title>Create account — Sasa Loan</title>
 <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
   <div class="center-page">
     <div class="wrap narrow">
       <div class="panel">
-        <div class="eyebrow">Northgate Loans</div>
+        <div class="eyebrow">Sasa Loan</div>
         <h1 style="margin-top:0;">Create your account</h1>
-        <p class="muted">Register as a borrower to apply for a loan.</p>
+        <p class="muted">Register as a borrower. You'll need your ID document and a live selfie — your camera will open below, no need to upload photos from your gallery.</p>
 
         <form id="regForm">
           <label for="full_name">Full name</label>
@@ -21,8 +21,9 @@
           <label for="email">Email</label>
           <input id="email" type="email" required autocomplete="email" />
 
-          <label for="phone">Phone number</label>
-          <input id="phone" autocomplete="tel" />
+          <label for="phone">WhatsApp phone number</label>
+          <input id="phone" required autocomplete="tel" placeholder="e.g. 0712345678" />
+          <p class="muted" style="margin-top:4px; font-size:12px;">We'll send loan updates and reminders to this number on WhatsApp.</p>
 
           <label for="national_id">National ID number</label>
           <input id="national_id" />
@@ -30,7 +31,35 @@
           <label for="password">Password</label>
           <input id="password" type="password" required minlength="6" autocomplete="new-password" />
 
-          <button class="btn btn-primary btn-block" type="submit" id="submitBtn">Create account</button>
+          <label>Photo of your ID document</label>
+          <div class="capture-box" id="idCaptureBox">
+            <div class="capture-label">Hold your ID steady in frame</div>
+            <video id="idVideo" playsinline muted class="hidden"></video>
+            <canvas id="idCanvas" class="hidden"></canvas>
+            <img id="idPreview" class="captured-preview hidden" />
+            <div class="capture-actions">
+              <button type="button" class="btn btn-outline" id="idStartBtn">Open camera</button>
+              <button type="button" class="btn btn-primary hidden" id="idCaptureBtn">Capture</button>
+              <button type="button" class="btn btn-outline hidden" id="idRetakeBtn">Retake</button>
+            </div>
+            <div class="capture-status hidden" id="idStatus">✓ ID photo captured</div>
+          </div>
+
+          <label style="margin-top:24px;">Live selfie</label>
+          <div class="capture-box" id="selfieCaptureBox">
+            <div class="capture-label">Look straight at the camera</div>
+            <video id="selfieVideo" playsinline muted class="hidden"></video>
+            <canvas id="selfieCanvas" class="hidden"></canvas>
+            <img id="selfiePreview" class="captured-preview hidden" />
+            <div class="capture-actions">
+              <button type="button" class="btn btn-outline" id="selfieStartBtn">Open camera</button>
+              <button type="button" class="btn btn-primary hidden" id="selfieCaptureBtn">Capture</button>
+              <button type="button" class="btn btn-outline hidden" id="selfieRetakeBtn">Retake</button>
+            </div>
+            <div class="capture-status hidden" id="selfieStatus">✓ Selfie captured</div>
+          </div>
+
+          <button class="btn btn-primary btn-block" type="submit" id="submitBtn" style="margin-top:24px;">Create account</button>
         </form>
 
         <div id="errorBox" class="error-msg hidden"></div>
@@ -43,12 +72,73 @@
   </div>
 
   <script src="/js/api.js"></script>
+  <script src="/js/camera.js"></script>
   <script>
+    let idPhotoData = null;
+    let selfiePhotoData = null;
+
+    function wireCapture({ prefix, facingMode, onCaptured }) {
+      const video = document.getElementById(prefix + 'Video');
+      const canvas = document.getElementById(prefix + 'Canvas');
+      const preview = document.getElementById(prefix + 'Preview');
+      const startBtn = document.getElementById(prefix + 'StartBtn');
+      const captureBtn = document.getElementById(prefix + 'CaptureBtn');
+      const retakeBtn = document.getElementById(prefix + 'RetakeBtn');
+      const status = document.getElementById(prefix + 'Status');
+      const cam = createCameraCapture({ videoEl: video, canvasEl: canvas, facingMode });
+
+      startBtn.addEventListener('click', async () => {
+        try {
+          await cam.start();
+          video.classList.remove('hidden');
+          startBtn.classList.add('hidden');
+          captureBtn.classList.remove('hidden');
+        } catch (e) {
+          alert('Could not access camera: ' + e.message + '. Please allow camera permission in your browser.');
+        }
+      });
+
+      captureBtn.addEventListener('click', () => {
+        const dataUrl = cam.capture();
+        video.classList.add('hidden');
+        captureBtn.classList.add('hidden');
+        preview.src = dataUrl;
+        preview.classList.remove('hidden');
+        retakeBtn.classList.remove('hidden');
+        status.classList.remove('hidden');
+        onCaptured(dataUrl);
+      });
+
+      retakeBtn.addEventListener('click', async () => {
+        preview.classList.add('hidden');
+        retakeBtn.classList.add('hidden');
+        status.classList.add('hidden');
+        onCaptured(null);
+        try {
+          await cam.start();
+          video.classList.remove('hidden');
+          captureBtn.classList.remove('hidden');
+        } catch (e) {
+          alert('Could not access camera: ' + e.message);
+        }
+      });
+    }
+
+    wireCapture({ prefix: 'id', facingMode: 'environment', onCaptured: (d) => { idPhotoData = d; } });
+    wireCapture({ prefix: 'selfie', facingMode: 'user', onCaptured: (d) => { selfiePhotoData = d; } });
+
     document.getElementById('regForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = document.getElementById('submitBtn');
       const errorBox = document.getElementById('errorBox');
       errorBox.classList.add('hidden');
+
+      if (!idPhotoData || !selfiePhotoData) {
+        errorBox.textContent = 'Please capture both your ID photo and a live selfie before submitting.';
+        errorBox.classList.remove('hidden');
+        return;
+      }
+
       btn.disabled = true;
       btn.textContent = 'Creating account…';
 
@@ -59,10 +149,12 @@
           phone: document.getElementById('phone').value.trim(),
           national_id: document.getElementById('national_id').value.trim(),
           password: document.getElementById('password').value,
+          id_photo: idPhotoData,
+          selfie_photo: selfiePhotoData,
         };
         const data = await api('/auth/register', { method: 'POST', body });
         Auth.setSession(data.token, data.user);
-        window.location.href = '/dashboard.html';
+        window.location.href = '/pending.html';
       } catch (err) {
         errorBox.textContent = err.message;
         errorBox.classList.remove('hidden');

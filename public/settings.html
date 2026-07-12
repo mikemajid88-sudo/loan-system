@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Loan settings — Sasa Loan</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Sasa <span class="mark">Loan</span></div>
+    <nav>
+      <span class="user-chip" id="userChip"></span>
+      <a href="/staff.html">Dashboard</a>
+      <a href="#" onclick="logout()">Sign out</a>
+    </nav>
+  </div>
+
+  <div class="wrap narrow">
+    <h1>Loan settings</h1>
+    <div class="panel">
+      <p class="muted">These apply to all new loan applications immediately. Existing loans keep the terms they were created with.</p>
+      <form id="settingsForm">
+        <label for="min_loan_amount">Minimum loan amount (KES)</label>
+        <input id="min_loan_amount" type="number" min="1" required />
+
+        <label for="max_loan_amount">Maximum loan amount (KES)</label>
+        <input id="max_loan_amount" type="number" min="1" required />
+
+        <label for="interest_rate">Interest rate (% flat, over the full term)</label>
+        <input id="interest_rate" type="number" step="0.1" min="0" required />
+
+        <label for="loan_term_days">Loan term (days)</label>
+        <input id="loan_term_days" type="number" min="1" required />
+
+        <button class="btn btn-primary btn-block" type="submit" id="submitBtn">Save changes</button>
+      </form>
+      <div id="errorBox" class="error-msg hidden"></div>
+      <div id="successBox" class="success-msg hidden"></div>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    const user = Auth.requireRole(['admin']);
+    if (user) document.getElementById('userChip').textContent = user.full_name;
+
+    async function load() {
+      try {
+        const settings = await getSettings();
+        document.getElementById('min_loan_amount').value = settings.min_loan_amount;
+        document.getElementById('max_loan_amount').value = settings.max_loan_amount;
+        document.getElementById('interest_rate').value = settings.interest_rate;
+        document.getElementById('loan_term_days').value = settings.loan_term_days;
+      } catch (e) {
+        document.getElementById('errorBox').textContent = e.message;
+        document.getElementById('errorBox').classList.remove('hidden');
+      }
+    }
+
+    document.getElementById('settingsForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('submitBtn');
+      const errorBox = document.getElementById('errorBox');
+      const successBox = document.getElementById('successBox');
+      errorBox.classList.add('hidden');
+      successBox.classList.add('hidden');
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+
+      try {
+        const body = {
+          min_loan_amount: document.getElementById('min_loan_amount').value,
+          max_loan_amount: document.getElementById('max_loan_amount').value,
+          interest_rate: document.getElementById('interest_rate').value,
+          loan_term_days: document.getElementById('loan_term_days').value,
+        };
+        await api('/settings', { method: 'PUT', body });
+        successBox.textContent = 'Settings saved.';
+        successBox.classList.remove('hidden');
+      } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save changes';
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>

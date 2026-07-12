@@ -4,16 +4,15 @@
  * (only borrowers can self-register), so use this script instead.
  *
  * Usage:
- *   node create-staff.js "Jane Doe" jane@example.com mypassword123 admin
- *   node create-staff.js "John Staff" john@example.com mypassword123 staff
+ *   node create-staff.js "Jane Doe" jane@example.com 0712345678 mypassword123 admin
  */
 const bcrypt = require('bcryptjs');
 const db = require('./src/db');
 
-const [, , fullName, email, password, role = 'staff'] = process.argv;
+const [, , fullName, email, phone, password, role = 'staff'] = process.argv;
 
-if (!fullName || !email || !password) {
-  console.log('Usage: node create-staff.js "Full Name" email@example.com password [staff|admin]');
+if (!fullName || !email || !phone || !password) {
+  console.log('Usage: node create-staff.js "Full Name" email@example.com phone password [staff|admin]');
   process.exit(1);
 }
 if (!['staff', 'admin'].includes(role)) {
@@ -29,7 +28,10 @@ if (existing) {
 
 const hash = bcrypt.hashSync(password, 10);
 const info = db
-  .prepare(`INSERT INTO users (full_name, email, password_hash, role) VALUES (?, ?, ?, ?)`)
-  .run(fullName, email.toLowerCase(), hash, role);
+  .prepare(
+    `INSERT INTO users (full_name, email, phone, password_hash, role, verification_status)
+     VALUES (?, ?, ?, ?, ?, 'approved')`
+  )
+  .run(fullName, email.toLowerCase(), phone, hash, role);
 
 console.log(`Created ${role} account: ${email} (id=${info.lastInsertRowid})`);

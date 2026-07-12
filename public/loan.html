@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Loan detail — Northgate Loans</title>
+<title>Loan detail — Sasa Loan</title>
 <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
   <div class="topbar">
-    <div class="brand">Northgate <span class="mark">Loans</span></div>
+    <div class="brand">Sasa <span class="mark">Loan</span></div>
     <nav>
       <span class="user-chip" id="userChip"></span>
       <a href="#" id="backLink">Back</a>
@@ -29,56 +29,116 @@
     const params = new URLSearchParams(window.location.search);
     const loanId = params.get('id');
 
+    const STATUS_LABELS = {
+      awaiting_guarantor: 'Awaiting guarantor approval',
+      pending_level1: 'Level 1 review pending',
+      pending_level2: 'Level 2 review pending',
+      approved: 'Approved — awaiting disbursement',
+      rejected: 'Rejected',
+      disbursed: 'Active (disbursed)',
+      repaid: 'Repaid',
+      defaulted: 'Overdue / defaulted',
+    };
+
     async function load() {
       const content = document.getElementById('content');
       try {
-        const { loan, events } = await api(`/loans/${loanId}`);
+        const { loan, events, extensions } = await api(`/loans/${loanId}`);
         const isStaff = ['staff', 'admin'].includes(user.role);
+        const isOwner = user.id === loan.user_id;
+        const isGuarantor = user.id === loan.guarantor_id;
 
         let actions = '';
         if (isStaff) {
-          if (loan.status === 'pending') {
-            actions += `<button class="btn btn-outline" onclick="vet()">Send for vetting</button>`;
+          if (loan.status === 'pending_level1') {
+            actions += `
+              <button class="btn btn-primary" onclick="level1('passed')">Pass Level 1</button>
+              <button class="btn btn-danger" onclick="level1('rejected')">Reject</button>`;
           }
-          if (['pending', 'under_review'].includes(loan.status)) {
-            actions += `<button class="btn btn-primary" onclick="approve()">Approve</button>`;
-            actions += `<button class="btn btn-danger" onclick="reject()">Reject</button>`;
+          if (loan.status === 'pending_level2') {
+            actions += `
+              <button class="btn btn-primary" onclick="level2('passed')">Pass Level 2</button>
+              <button class="btn btn-danger" onclick="level2('rejected')">Reject</button>`;
           }
           if (loan.status === 'approved') {
             actions += `<button class="btn btn-amber" onclick="disburse()">Mark as disbursed</button>`;
           }
+          if (['disbursed', 'defaulted'].includes(loan.status)) {
+            actions += `<button class="btn btn-primary" onclick="repay()">Mark as repaid</button>`;
+          }
+        }
+        if (isGuarantor && loan.guarantor_status === 'pending') {
+          actions += `
+            <button class="btn btn-primary" onclick="guarantorRespond('approved')">Approve as guarantor</button>
+            <button class="btn btn-outline" onclick="guarantorRespond('declined')">Decline</button>`;
+        }
+
+        const pendingExt = extensions.find(e => e.status === 'pending');
+        let extensionBox = '';
+        if (isOwner && ['disbursed', 'defaulted'].includes(loan.status) && !pendingExt) {
+          extensionBox = `
+            <div class="panel" style="margin-bottom:20px;">
+              <h3 style="margin-top:0;">Need more time?</h3>
+              <p class="muted">Submit a written request to run this loan for another ${loan.term_days} days. Staff will review it.</p>
+              <textarea id="extReason" placeholder="Explain why you need an extension…"></textarea>
+              <button class="btn btn-outline" style="margin-top:10px;" onclick="requestExtension()">Request extension</button>
+            </div>`;
+        }
+        if (isStaff && pendingExt) {
+          extensionBox = `
+            <div class="panel" style="margin-bottom:20px; border-color: var(--amber);">
+              <h3 style="margin-top:0;">Pending extension request</h3>
+              <p>${pendingExt.reason}</p>
+              <div class="row-flex">
+                <button class="btn btn-primary" onclick="reviewExtension(${pendingExt.id}, 'approved')">Approve extension</button>
+                <button class="btn btn-danger" onclick="reviewExtension(${pendingExt.id}, 'rejected')">Reject</button>
+              </div>
+            </div>`;
         }
 
         content.innerHTML = `
-          <div class="row-flex" style="justify-content:space-between; margin-bottom:20px;">
+          <div class="row-flex" style="justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:8px;">
             <h1 style="margin:0;">Loan #${loan.id}</h1>
-            ${badge(loan.status)}
+            ${countdownPill(loan.days_remaining, loan.status)}
           </div>
+          <p class="muted" style="margin-top:-14px;">${STATUS_LABELS[loan.status] || loan.status}</p>
 
           <div class="panel" style="margin-bottom:20px;">
             <h3 style="margin-top:0;">Applicant</h3>
-            <p><strong>${loan.full_name}</strong><br/>
-            ${loan.email}${loan.phone ? ' · ' + loan.phone : ''}${loan.national_id ? ' · ID ' + loan.national_id : ''}</p>
+            <p><strong>${loan.full_name}</strong><br/>${loan.email} · ${loan.phone}${loan.national_id ? ' · ID ' + loan.national_id : ''}</p>
           </div>
 
           <div class="panel" style="margin-bottom:20px;">
             <h3 style="margin-top:0;">Loan details</h3>
             <div class="field-row">
-              <div><span class="muted">Amount requested</span><br/><strong>KES ${money(loan.amount)}</strong></div>
-              <div><span class="muted">Term</span><br/><strong>${loan.term_months} months</strong></div>
-              <div><span class="muted">Interest rate</span><br/><strong>${loan.interest_rate}% p.a.</strong></div>
-              <div><span class="muted">Monthly payment</span><br/><strong>KES ${money(loan.monthly_payment)}</strong></div>
+              <div><span class="muted">Amount</span><br/><strong>KES ${money(loan.amount)}</strong></div>
+              <div><span class="muted">Interest rate</span><br/><strong>${loan.interest_rate}% flat</strong></div>
               <div><span class="muted">Total repayable</span><br/><strong>KES ${money(loan.total_repayable)}</strong></div>
-              <div><span class="muted">Applied on</span><br/><strong>${fmtDate(loan.created_at)}</strong></div>
+              <div><span class="muted">Term</span><br/><strong>${loan.term_days} days</strong></div>
+              <div><span class="muted">Disbursement date</span><br/><strong>${loan.disbursement_date}</strong></div>
+              <div><span class="muted">Due date</span><br/><strong>${loan.due_date}</strong></div>
             </div>
             ${loan.purpose ? `<p style="margin-top:16px;"><span class="muted">Purpose:</span><br/>${loan.purpose}</p>` : ''}
-            ${loan.staff_notes ? `<p style="margin-top:16px;"><span class="muted">Staff notes:</span><br/>${loan.staff_notes}</p>` : ''}
           </div>
 
-          ${isStaff && actions ? `
+          <div class="panel" style="margin-bottom:20px;">
+            <h3 style="margin-top:0;">Guarantor</h3>
+            <p><strong>${loan.guarantor_name || '—'}</strong> ${loan.guarantor_phone ? '· ' + loan.guarantor_phone : ''}<br/>
+            ${badge(loan.guarantor_status === 'approved' ? 'approved' : loan.guarantor_status === 'declined' ? 'rejected' : 'pending')}</p>
+          </div>
+
+          <div class="panel" style="margin-bottom:20px;">
+            <h3 style="margin-top:0;">Approval trail</h3>
+            <p><strong>Level 1:</strong> ${loan.level1_status}${loan.level1_note ? ' — ' + loan.level1_note : ''}</p>
+            <p><strong>Level 2:</strong> ${loan.level2_status}${loan.level2_note ? ' — ' + loan.level2_note : ''}</p>
+          </div>
+
+          ${extensionBox}
+
+          ${actions ? `
             <div class="panel" style="margin-bottom:20px;">
               <h3 style="margin-top:0;">Actions</h3>
-              <div class="row-flex">${actions}</div>
+              <div class="row-flex" style="flex-wrap:wrap;">${actions}</div>
               <div id="errorBox" class="error-msg hidden"></div>
             </div>` : ''}
 
@@ -89,9 +149,9 @@
               <tbody>
                 ${events.map(ev => `
                   <tr>
-                    <td>${fmtDate(ev.created_at)}</td>
-                    <td>${ev.action.replace('_',' ')}</td>
-                    <td>${ev.note || '—'}</td>
+                    <td data-label="Date">${fmtDate(ev.created_at)}</td>
+                    <td data-label="Action">${ev.action.replace(/_/g,' ')}</td>
+                    <td data-label="Note">${ev.note || '—'}</td>
                   </tr>`).join('')}
               </tbody>
             </table>
@@ -105,28 +165,43 @@
     function showErr(msg) {
       const box = document.getElementById('errorBox');
       if (box) { box.textContent = msg; box.classList.remove('hidden'); }
+      else alert(msg);
     }
 
-    async function vet() {
-      const note = prompt('Add a vetting note (optional):') || '';
-      try { await api(`/loans/${loanId}/vet`, { method: 'POST', body: { note } }); load(); }
+    async function level1(decision) {
+      const note = prompt('Add a note (optional):') || '';
+      try { await api(`/loans/${loanId}/level1`, { method: 'POST', body: { decision, note } }); load(); }
       catch (e) { showErr(e.message); }
     }
-    async function approve() {
-      const note = prompt('Add an approval note (optional):') || '';
-      if (!confirm('Approve this loan?')) return;
-      try { await api(`/loans/${loanId}/approve`, { method: 'POST', body: { note } }); load(); }
-      catch (e) { showErr(e.message); }
-    }
-    async function reject() {
-      const note = prompt('Reason for rejection (required):');
-      if (!note) return;
-      try { await api(`/loans/${loanId}/reject`, { method: 'POST', body: { note } }); load(); }
+    async function level2(decision) {
+      const note = prompt('Add a note (optional):') || '';
+      try { await api(`/loans/${loanId}/level2`, { method: 'POST', body: { decision, note } }); load(); }
       catch (e) { showErr(e.message); }
     }
     async function disburse() {
       if (!confirm('Mark this loan as disbursed?')) return;
       try { await api(`/loans/${loanId}/disburse`, { method: 'POST' }); load(); }
+      catch (e) { showErr(e.message); }
+    }
+    async function repay() {
+      if (!confirm('Mark this loan as fully repaid?')) return;
+      try { await api(`/loans/${loanId}/repay`, { method: 'POST' }); load(); }
+      catch (e) { showErr(e.message); }
+    }
+    async function guarantorRespond(decision) {
+      if (decision === 'declined' && !confirm('Decline this guarantor request?')) return;
+      try { await api(`/loans/${loanId}/guarantor-respond`, { method: 'POST', body: { decision } }); load(); }
+      catch (e) { showErr(e.message); }
+    }
+    async function requestExtension() {
+      const reason = document.getElementById('extReason').value.trim();
+      if (!reason) { alert('Please explain why you need an extension'); return; }
+      try { await api(`/loans/${loanId}/request-extension`, { method: 'POST', body: { reason } }); load(); }
+      catch (e) { alert(e.message); }
+    }
+    async function reviewExtension(extId, decision) {
+      const note = prompt(`Note for ${decision === 'approved' ? 'approving' : 'rejecting'} this extension (optional):`) || '';
+      try { await api(`/loans/extensions/${extId}/review`, { method: 'POST', body: { decision, note } }); load(); }
       catch (e) { showErr(e.message); }
     }
 

@@ -65,3 +65,16 @@ function logout() {
   Auth.clear();
   window.location.href = '/index.html';
 }
+
+function countdownPill(daysRemaining, status) {
+  if (status !== 'disbursed' || daysRemaining === null || daysRemaining === undefined) return '';
+  if (daysRemaining < 0) return `<span class="countdown-pill countdown-overdue">Overdue ${Math.abs(daysRemaining)}d</span>`;
+  if (daysRemaining <= 3) return `<span class="countdown-pill countdown-overdue">${daysRemaining}d left</span>`;
+  if (daysRemaining <= 7) return `<span class="countdown-pill countdown-soon">${daysRemaining}d left</span>`;
+  return `<span class="countdown-pill countdown-ok">${daysRemaining}d left</span>`;
+}
+
+async function getSettings() {
+  const { settings } = await api('/settings');
+  return settings;
+}

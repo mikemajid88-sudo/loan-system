@@ -25,15 +25,15 @@ function ensureDefaultAdmin() {
   const hash = bcrypt.hashSync(password, 10);
 
   db.prepare(
-    `INSERT INTO users (full_name, email, password_hash, role) VALUES (?, ?, ?, 'admin')`
-  ).run('Default Admin', email, hash);
+    `INSERT INTO users (full_name, email, phone, password_hash, role, verification_status)
+     VALUES (?, ?, ?, ?, 'admin', 'approved')`
+  ).run('Default Admin', email, '0700000000', hash);
 
   console.log('============================================================');
   console.log('No staff/admin account existed, so a default one was created:');
   console.log(`  Email:    ${email}`);
   console.log(`  Password: ${password}`);
-  console.log('Sign in and change this password immediately (see /staff.html');
-  console.log('once signed in, or create a proper account and stop using this one).');
+  console.log('Sign in and change this password immediately.');
   console.log('============================================================');
 }
 

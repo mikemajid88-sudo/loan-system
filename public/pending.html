@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Verification pending — Sasa Loan</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Sasa <span class="mark">Loan</span></div>
+    <nav>
+      <a href="#" onclick="logout()">Sign out</a>
+    </nav>
+  </div>
+
+  <div class="wrap narrow">
+    <div class="panel empty-state" id="content">
+      <p class="muted">Loading…</p>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    const user = Auth.requireRole(['borrower']);
+
+    async function load() {
+      const content = document.getElementById('content');
+      try {
+        const { user: fresh } = await api('/auth/me');
+        Auth.setSession(Auth.getToken(), fresh);
+
+        if (fresh.verification_status === 'approved') {
+          window.location.href = '/dashboard.html';
+          return;
+        }
+        if (fresh.verification_status === 'rejected') {
+          content.innerHTML = `
+            <h3>Verification unsuccessful</h3>
+            <p>We weren't able to verify your account. Please contact support to find out why, or try registering again with clearer documents.</p>`;
+          return;
+        }
+        content.innerHTML = `
+          <h3>Your account is being reviewed</h3>
+          <p>Thanks for registering, ${fresh.full_name.split(' ')[0]}. Our staff are verifying your ID and selfie.
+          You'll get a WhatsApp message as soon as you're approved — usually within one business day.</p>
+          <p class="muted">You can close this page and check back later.</p>`;
+      } catch (err) {
+        content.innerHTML = `<div class="error-msg">${err.message}</div>`;
+      }
+    }
+    load();
+  </script>
+</body>
+</html>
