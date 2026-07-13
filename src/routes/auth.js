@@ -149,4 +149,32 @@ router.post('/users/:id/verify', requireAuth, requireAnyRole(...ALL_STAFF_ROLES)
   res.json({ user: safe });
 });
 
+// Staff-side: create an already-verified Member directly (e.g. for walk-ins).
+// Still requires the same ID photo + live selfie capture, just performed by staff.
+router.post('/members', requireAuth, requireAnyRole(...ALL_STAFF_ROLES), blockIfMustChangePassword, (req, res) => {
+  const { full_name, email, phone, national_id, password, id_photo, selfie_photo } = req.body;
+
+  if (!full_name || !email || !phone || !password) {
+    return res.status(400).json({ error: 'full_name, email, phone and password are required' });
+  }
+  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  if (!id_photo || !selfie_photo) return res.status(400).json({ error: 'ID photo and a live selfie are both required' });
+
+  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase());
+  if (existing) return res.status(409).json({ error: 'Email already registered' });
+
+  const hash = bcrypt.hashSync(password, 10);
+  const info = db
+    .prepare(
+      `INSERT INTO users (full_name, email, phone, national_id, password_hash, roles, verification_status,
+         id_photo, selfie_photo, verified_by, verified_at, created_by)
+       VALUES (?, ?, ?, ?, ?, 'member', 'approved', ?, ?, ?, datetime('now'), ?)`
+    )
+    .run(full_name, email.toLowerCase(), phone, national_id || null, hash, id_photo, selfie_photo, req.user.id, req.user.id);
+
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
+  const { password_hash: _, ...safe } = user;
+  res.status(201).json({ user: safe });
+});
+
 module.exports = router;

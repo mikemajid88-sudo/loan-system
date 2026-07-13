@@ -43,7 +43,7 @@
     async function load() {
       const content = document.getElementById('content');
       try {
-        const { loan, events, extensions } = await api(`/loans/${loanId}`);
+        const { loan, events, extensions, repayments } = await api(`/loans/${loanId}`);
         const isLoanOfficer = Auth.hasAnyRole(user, ['loan_officer']);
         const isCreditManager = Auth.hasAnyRole(user, ['credit_manager']);
         const isStaff = Auth.hasAnyRole(user, ['loan_officer','credit_manager','admin','super_admin']);
@@ -64,9 +64,6 @@
         if (isCreditManager && loan.status === 'approved') {
           actions += `<button class="btn btn-amber" onclick="disburse()">Mark as disbursed</button>`;
         }
-        if (isCreditManager && ['disbursed', 'defaulted'].includes(loan.status)) {
-          actions += `<button class="btn btn-primary" onclick="repay()">Mark as repaid</button>`;
-        }
         if (isGuarantor && loan.guarantor_status === 'pending') {
           actions += `
             <button class="btn btn-primary" onclick="guarantorRespond('approved')">Approve as guarantor</button>
@@ -84,8 +81,8 @@
         if (isStaff && loan.status === 'disbursed') {
           waButtons += `<button class="btn btn-outline" onclick="pushDisbursementMessage()">📱 Send disbursement notice</button>`;
         }
-        if (isStaff && (loan.verification_status || true)) {
-          // Generic fallback: staff can always message the applicant directly
+        if (isStaff && loan.status === 'defaulted' && loan.guarantor_phone) {
+          waButtons += `<button class="btn btn-outline" onclick="pushGuarantorLiabilityNotice()">📱 Notify guarantor of liability</button>`;
         }
 
         const pendingExt = extensions.find(e => e.status === 'pending');
@@ -115,6 +112,21 @@
           waButtons += `<button class="btn btn-outline" onclick="pushExtensionMessage('${lastApproved.new_due_date}')">📱 Send extension confirmation</button>`;
         }
 
+        // Repayment recording form - Credit Manager only, while loan is disbursed/overdue
+        let repaymentBox = '';
+        if (isCreditManager && ['disbursed', 'defaulted'].includes(loan.status)) {
+          repaymentBox = `
+            <div class="panel" style="margin-bottom:20px;">
+              <h3 style="margin-top:0;">Record a repayment</h3>
+              <p class="muted">Outstanding balance: <strong>KES ${money(loan.balance)}</strong></p>
+              <label for="repayAmount">Amount received (KES)</label>
+              <input id="repayAmount" type="number" step="0.01" min="0.01" max="${loan.balance}" />
+              <label for="repayNote">Note (optional)</label>
+              <input id="repayNote" placeholder="e.g. M-Pesa, cash, reference number" />
+              <button class="btn btn-primary" style="margin-top:12px;" onclick="recordRepayment(${loan.balance})">Record repayment</button>
+            </div>`;
+        }
+
         content.innerHTML = `
           <div class="row-flex" style="justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:8px;">
             <h1 style="margin:0;">Loan #${loan.id}</h1>
@@ -122,29 +134,46 @@
           </div>
           <p class="muted" style="margin-top:-14px;">${STATUS_LABELS[loan.status] || loan.status}</p>
 
-          <div class="panel" style="margin-bottom:20px;">
-            <h3 style="margin-top:0;">Applicant</h3>
-            <p><strong>${loan.full_name}</strong><br/>${loan.email} · ${loan.phone}${loan.national_id ? ' · ID ' + loan.national_id : ''}</p>
+          <div class="grid-2" style="margin-bottom:20px;">
+            <div class="panel">
+              <h3 style="margin-top:0;">Applicant</h3>
+              <p><strong>${loan.full_name}</strong><br/>${loan.email} · ${loan.phone}${loan.national_id ? ' · ID ' + loan.national_id : ''}</p>
+            </div>
+            <div class="panel">
+              <h3 style="margin-top:0;">Guarantor</h3>
+              <p><strong>${loan.guarantor_name || '—'}</strong> ${loan.guarantor_phone ? '· ' + loan.guarantor_phone : ''}<br/>
+              ${badge(loan.guarantor_status === 'approved' ? 'approved' : loan.guarantor_status === 'declined' ? 'rejected' : 'pending')}</p>
+              ${loan.guarantor_liability_amount ? `<p class="muted" style="margin-top:8px; font-size:13px;">Liable for up to <strong>KES ${money(loan.guarantor_liability_amount)}</strong> if this loan defaults.</p>` : ''}
+            </div>
           </div>
 
           <div class="panel" style="margin-bottom:20px;">
-            <h3 style="margin-top:0;">Loan details</h3>
+            <h3 style="margin-top:0;">Loan statement</h3>
             <div class="field-row">
               <div><span class="muted">Amount</span><br/><strong>KES ${money(loan.amount)}</strong></div>
               <div><span class="muted">Interest rate</span><br/><strong>${loan.interest_rate}% flat</strong></div>
               <div><span class="muted">Total repayable</span><br/><strong>KES ${money(loan.total_repayable)}</strong></div>
-              <div><span class="muted">Term</span><br/><strong>${loan.term_days} days</strong></div>
-              <div><span class="muted">Disbursement date</span><br/><strong>${loan.disbursement_date}</strong></div>
+              <div><span class="muted">Amount paid</span><br/><strong style="color: var(--green);">KES ${money(loan.amount_paid)}</strong></div>
+              <div><span class="muted">Balance</span><br/><strong style="color: ${loan.balance > 0 ? 'var(--red)' : 'var(--green)'};">KES ${money(loan.balance)}</strong></div>
               <div><span class="muted">Due date</span><br/><strong>${loan.due_date}</strong></div>
             </div>
             ${loan.purpose ? `<p style="margin-top:16px;"><span class="muted">Purpose:</span><br/>${loan.purpose}</p>` : ''}
+            ${repayments.length > 0 ? `
+              <table style="margin-top:16px;">
+                <thead><tr><th>Date</th><th>Amount</th><th>Note</th><th>Recorded by</th></tr></thead>
+                <tbody>
+                  ${repayments.map(r => `
+                    <tr>
+                      <td data-label="Date">${fmtDate(r.created_at)}</td>
+                      <td data-label="Amount">KES ${money(r.amount)}</td>
+                      <td data-label="Note">${r.note || '—'}</td>
+                      <td data-label="Recorded by">${r.recorded_by_name || '—'}</td>
+                    </tr>`).join('')}
+                </tbody>
+              </table>` : ''}
           </div>
 
-          <div class="panel" style="margin-bottom:20px;">
-            <h3 style="margin-top:0;">Guarantor</h3>
-            <p><strong>${loan.guarantor_name || '—'}</strong> ${loan.guarantor_phone ? '· ' + loan.guarantor_phone : ''}<br/>
-            ${badge(loan.guarantor_status === 'approved' ? 'approved' : loan.guarantor_status === 'declined' ? 'rejected' : 'pending')}</p>
-          </div>
+          ${repaymentBox}
 
           <div class="panel" style="margin-bottom:20px;">
             <h3 style="margin-top:0;">Approval trail</h3>
@@ -205,10 +234,16 @@
       try { await api(`/loans/${loanId}/disburse`, { method: 'POST' }); load(); }
       catch (e) { showErr(e.message); }
     }
-    async function repay() {
-      if (!confirm('Mark this loan as fully repaid?')) return;
-      try { await api(`/loans/${loanId}/repay`, { method: 'POST' }); load(); }
-      catch (e) { showErr(e.message); }
+    async function recordRepayment(maxBalance) {
+      const amount = Number(document.getElementById('repayAmount').value);
+      const note = document.getElementById('repayNote').value.trim();
+      if (!amount || amount <= 0) { showErr('Enter a valid amount'); return; }
+      if (amount > maxBalance) { showErr(`Amount exceeds the outstanding balance of KES ${money(maxBalance)}`); return; }
+      try {
+        const result = await api(`/loans/${loanId}/repayments`, { method: 'POST', body: { amount, note } });
+        if (result.fully_paid) alert('Loan fully repaid!');
+        load();
+      } catch (e) { showErr(e.message); }
     }
     async function guarantorRespond(decision) {
       if (decision === 'declined' && !confirm('Decline this guarantor request?')) return;
@@ -246,6 +281,11 @@
       const loan = window._loan;
       const msg = `Dear ${loan.full_name}, your extension request has been approved. New amount due: KES ${loan.total_repayable}, new due date: ${newDueDate}.`;
       pushWhatsApp(loan.phone, msg, loan.id);
+    }
+    function pushGuarantorLiabilityNotice() {
+      const loan = window._loan;
+      const msg = `Dear ${loan.guarantor_name}, ${loan.full_name}'s Sasa Loan of KES ${loan.amount} is now overdue. As guarantor, you are liable for up to KES ${loan.guarantor_liability_amount}. Please contact us to discuss.`;
+      pushWhatsApp(loan.guarantor_phone, msg, loan.id);
     }
 
     load();

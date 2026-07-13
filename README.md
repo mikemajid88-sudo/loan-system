@@ -155,3 +155,36 @@ loan-system/
 - Set a real, random `JWT_SECRET`
 - Serve over HTTPS (required for camera access anyway)
 - Back up `data/loans.db` regularly — it contains ID documents
+
+## What's new in this version
+
+**Repayment tracking** — Credit Managers record partial or full repayments
+against a loan (`/api/loans/:id/repayments`); the system tracks a running
+balance and automatically marks a loan `repaid` once fully paid. Full
+statement (amount paid, balance, each repayment with who recorded it) is
+on the loan detail page.
+
+**Guarantor liability** — every loan calculates a guarantor liability of
+**50% of the principal amount**. This is shown to the guarantor in plain
+language before they approve, and staff get a one-click WhatsApp button
+to notify the guarantor of their liability if the loan defaults.
+
+**Admin-created members** — any staff-side role can add an already-verified
+member directly from `/add-member.html`, using the same live camera
+capture as public registration (for walk-ins staff can vouch for).
+
+**Reports module** (`/reports.html`, Admin/Super Admin only) — portfolio
+at risk with aging buckets, cash flow trend chart, and CSV export of all
+loans/members.
+
+**Search** — staff can search members/loans by name or phone from the
+dashboard.
+
+**Reorganized navigation** — Dashboard, Reports, System settings (loan
+parameters + Manage users), User settings (change password), matching a
+"Loan Services / System Settings / User Settings" structure.
+
+**Redesigned dashboard** — grid-based cards throughout, and the dashboard
+now adapts by role: Loan Officers see KYC + Level 1 queue emphasized;
+Credit Managers see Level 2, active/overdue loans, and repayment
+recording; Admin/Super Admin get Reports and Manage Users in the nav.

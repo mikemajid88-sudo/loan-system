@@ -61,8 +61,11 @@
                 <div class="card-item">
                   <strong>${r.applicant_name}</strong> wants you as guarantor for a loan of KES ${money(r.amount)}
                   (repayable KES ${money(r.total_repayable)} by ${r.due_date}).
+                  <div class="liability-notice">
+                    ⚠️ If ${r.applicant_name} defaults on this loan, you will be liable to pay up to <strong>KES ${money(r.guarantor_liability_amount)}</strong> (50% of the loan amount).
+                  </div>
                   <div class="row-flex" style="margin-top:10px;">
-                    <button class="btn btn-primary" onclick="respond(${r.id}, 'approved')">Approve</button>
+                    <button class="btn btn-primary" onclick="respond(${r.id}, 'approved', ${r.guarantor_liability_amount})">Approve</button>
                     <button class="btn btn-outline" onclick="respond(${r.id}, 'declined')">Decline</button>
                   </div>
                 </div>
@@ -72,8 +75,9 @@
       } catch (e) { /* non-fatal */ }
     }
 
-    async function respond(loanId, decision) {
+    async function respond(loanId, decision, liabilityAmount) {
       if (decision === 'declined' && !confirm('Decline this guarantor request?')) return;
+      if (decision === 'approved' && !confirm(`By approving, you confirm you understand you are liable for up to KES ${money(liabilityAmount)} if this loan defaults. Continue?`)) return;
       try {
         await api(`/loans/${loanId}/guarantor-respond`, { method: 'POST', body: { decision } });
         loadGuarantorRequests();
@@ -100,7 +104,7 @@
         }
 
         content.innerHTML = `
-          <div class="card-list">
+          <div class="grid-auto">
             ${loans.map(l => `
               <div class="card-item clickable" onclick="window.location.href='/loan.html?id=${l.id}'">
                 <div class="row-flex" style="justify-content:space-between;">

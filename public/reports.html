@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Reports — Sasa Loan</title>
+<link rel="stylesheet" href="/css/style.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Sasa <span class="mark">Loan</span></div>
+    <nav>
+      <span class="user-chip" id="userChip"></span>
+      <a href="/staff.html">Dashboard</a>
+      <a href="#" onclick="logout()">Sign out</a>
+    </nav>
+  </div>
+
+  <div class="wrap">
+    <h1>Reports</h1>
+
+    <h2 class="section-title">Overview</h2>
+    <div class="stat-grid" id="overviewGrid" style="margin-bottom:32px;"></div>
+
+    <h2 class="section-title">Portfolio at risk</h2>
+    <div class="panel" style="margin-bottom:32px;">
+      <div class="field-row" style="margin-bottom:16px;">
+        <div><span class="muted">Total outstanding</span><br/><strong id="parOutstanding">—</strong></div>
+        <div><span class="muted">Portfolio at risk</span><br/><strong id="parRatio">—</strong></div>
+      </div>
+      <div class="grid-3">
+        <div class="stat-card"><div class="num" id="bucketCurrent">—</div><div class="lbl">Current (not yet due)</div></div>
+        <div class="stat-card"><div class="num" id="bucket1to7">—</div><div class="lbl">1–7 days overdue</div></div>
+        <div class="stat-card"><div class="num" id="bucket8to30">—</div><div class="lbl">8–30 days overdue</div></div>
+      </div>
+      <div class="stat-card" style="margin-top:16px; border-color: var(--red);">
+        <div class="num" id="bucket30plus" style="color: var(--red);">—</div><div class="lbl">30+ days overdue (high risk)</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">Cash flow trend</h2>
+    <div class="panel" style="margin-bottom:32px;">
+      <div class="field-row" style="margin-bottom:20px;">
+        <div><span class="muted">Outstanding</span><br/><strong id="cfOutstanding">—</strong></div>
+        <div><span class="muted">Overdue amount</span><br/><strong id="cfOverdue">—</strong></div>
+        <div><span class="muted">Total repaid (all time)</span><br/><strong id="cfRepaid">—</strong></div>
+      </div>
+      <canvas id="cashflowChart" height="90"></canvas>
+    </div>
+
+    <h2 class="section-title">Export data</h2>
+    <div class="grid-2">
+      <a class="module-card" href="/api/reports/loans.csv" target="_blank">
+        <span class="icon">📄</span>
+        <div class="title">Export all loans (CSV)</div>
+        <div class="desc">Every loan, amount, status, and guarantor</div>
+      </a>
+      <a class="module-card" href="/api/reports/members.csv" target="_blank">
+        <span class="icon">📄</span>
+        <div class="title">Export all members (CSV)</div>
+        <div class="desc">Full member list with verification status</div>
+      </a>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    const user = Auth.requireRole(['admin', 'super_admin']);
+    if (user) document.getElementById('userChip').textContent = user.full_name;
+
+    async function loadOverview() {
+      try {
+        const s = await api('/reports/summary');
+        document.getElementById('overviewGrid').innerHTML = [
+          { lbl: 'Total members', num: s.totalMembers },
+          { lbl: 'Verified members', num: s.activeMembers },
+          { lbl: 'Total loans (all time)', num: s.totalLoans },
+          { lbl: 'Repaid on time', num: s.repaidOnTime },
+          { lbl: 'Ever defaulted', num: s.defaultedCount },
+        ].map(c => `<div class="stat-card"><div class="num">${c.num}</div><div class="lbl">${c.lbl}</div></div>`).join('');
+      } catch (e) { /* non-fatal */ }
+    }
+
+    async function loadPAR() {
+      try {
+        const p = await api('/reports/portfolio-at-risk');
+        document.getElementById('parOutstanding').textContent = 'KES ' + money(p.totalOutstanding);
+        document.getElementById('parRatio').textContent = p.parRatio + '%';
+        document.getElementById('bucketCurrent').textContent = 'KES ' + money(p.buckets.current);
+        document.getElementById('bucket1to7').textContent = 'KES ' + money(p.buckets.days1to7);
+        document.getElementById('bucket8to30').textContent = 'KES ' + money(p.buckets.days8to30);
+        document.getElementById('bucket30plus').textContent = 'KES ' + money(p.buckets.days30plus);
+      } catch (e) { /* non-fatal */ }
+    }
+
+    async function loadCashflow() {
+      try {
+        const data = await api('/loans/stats/cashflow');
+        document.getElementById('cfOutstanding').textContent = 'KES ' + money(data.outstanding);
+        document.getElementById('cfOverdue').textContent = 'KES ' + money(data.overdueAmount);
+        document.getElementById('cfRepaid').textContent = 'KES ' + money(data.totalRepaidAllTime);
+        new Chart(document.getElementById('cashflowChart'), {
+          type: 'bar',
+          data: {
+            labels: data.trend.map(t => t.period),
+            datasets: [
+              { label: 'Disbursed', data: data.trend.map(t => t.disbursed), backgroundColor: '#1F3A5F' },
+              { label: 'Repaid', data: data.trend.map(t => t.repaid), backgroundColor: '#2E7D5B' },
+            ],
+          },
+          options: { responsive: true, scales: { y: { beginAtZero: true } } },
+        });
+      } catch (e) { /* non-fatal */ }
+    }
+
+    loadOverview();
+    loadPAR();
+    loadCashflow();
+  </script>
+</body>
+</html>

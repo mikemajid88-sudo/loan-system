@@ -50,15 +50,16 @@ router.post('/apply', requireAuth, requireAnyRole('member'), requireVerified, (r
 
   const calc = calculateLoan(amt, interestRate);
   const dueDate = addDays(disbursement_date, termDays);
+  const liabilityAmount = Math.round(amt * 0.5 * 100) / 100;
 
   const info = db
     .prepare(
       `INSERT INTO loans (user_id, amount, purpose, interest_rate, term_days, total_repayable,
-         disbursement_date, due_date, guarantor_id, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'awaiting_guarantor')`
+         disbursement_date, due_date, guarantor_id, guarantor_liability_amount, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'awaiting_guarantor')`
     )
     .run(req.user.id, amt, purpose || null, interestRate, termDays, calc.totalRepayable,
-         disbursement_date, dueDate, guarantor_id);
+         disbursement_date, dueDate, guarantor_id, liabilityAmount);
 
   logEvent(info.lastInsertRowid, req.user.id, 'applied', null);
   res.status(201).json({ loan: db.prepare('SELECT * FROM loans WHERE id = ?').get(info.lastInsertRowid) });
@@ -175,7 +176,10 @@ router.get('/:id', requireAuth, (req, res) => {
 
   const events = db.prepare('SELECT * FROM loan_events WHERE loan_id = ? ORDER BY created_at ASC').all(loan.id);
   const extensions = db.prepare('SELECT * FROM loan_extensions WHERE loan_id = ? ORDER BY created_at DESC').all(loan.id);
-  res.json({ loan: { ...loan, days_remaining: daysRemaining(loan.due_date) }, events, extensions });
+  const repayments = db.prepare('SELECT repayments.*, users.full_name as recorded_by_name FROM repayments LEFT JOIN users ON users.id = repayments.recorded_by WHERE loan_id = ? ORDER BY created_at ASC').all(loan.id);
+  const amountPaid = repayments.reduce((sum, r) => sum + r.amount, 0);
+  const balance = Math.max(0, Math.round((loan.total_repayable - amountPaid) * 100) / 100);
+  res.json({ loan: { ...loan, days_remaining: daysRemaining(loan.due_date), amount_paid: amountPaid, balance }, events, extensions, repayments });
 });
 
 // Loan Officer only: Level 1 review
@@ -231,16 +235,41 @@ router.post('/:id/disburse', requireAuth, requireAnyRole('credit_manager'), bloc
   res.json({ loan: db.prepare('SELECT * FROM loans WHERE id = ?').get(loan.id) });
 });
 
-// Credit Manager only: mark repaid
-router.post('/:id/repay', requireAuth, requireAnyRole('credit_manager'), blockIfMustChangePassword, (req, res) => {
+// Credit Manager only: record a repayment (partial or full)
+router.post('/:id/repayments', requireAuth, requireAnyRole('credit_manager'), blockIfMustChangePassword, (req, res) => {
+  const { amount, note } = req.body;
+  const amt = Number(amount);
+  if (!amt || amt <= 0) return res.status(400).json({ error: 'A positive repayment amount is required' });
+
   const loan = db.prepare('SELECT * FROM loans WHERE id = ?').get(req.params.id);
   if (!loan) return res.status(404).json({ error: 'Loan not found' });
   if (!['disbursed', 'defaulted'].includes(loan.status)) {
-    return res.status(400).json({ error: 'Only disbursed or defaulted loans can be marked repaid' });
+    return res.status(400).json({ error: 'Repayments can only be recorded on disbursed or overdue loans' });
   }
-  db.prepare(`UPDATE loans SET status='repaid', updated_at=datetime('now') WHERE id=?`).run(loan.id);
-  logEvent(loan.id, req.user.id, 'repaid', null);
-  res.json({ loan: db.prepare('SELECT * FROM loans WHERE id = ?').get(loan.id) });
+
+  const existingPaid = db.prepare('SELECT COALESCE(SUM(amount),0) as total FROM repayments WHERE loan_id = ?').get(loan.id).total;
+  const balance = loan.total_repayable - existingPaid;
+  if (amt > balance + 0.01) {
+    return res.status(400).json({ error: `Amount exceeds outstanding balance of KES ${balance.toFixed(2)}` });
+  }
+
+  db.prepare(`INSERT INTO repayments (loan_id, amount, note, recorded_by) VALUES (?, ?, ?, ?)`)
+    .run(loan.id, amt, note || null, req.user.id);
+  logEvent(loan.id, req.user.id, 'repayment_recorded', `KES ${amt}${note ? ' — ' + note : ''}`);
+
+  const newPaid = existingPaid + amt;
+  const fullyPaid = newPaid >= loan.total_repayable - 0.01;
+  if (fullyPaid) {
+    db.prepare(`UPDATE loans SET status='repaid', updated_at=datetime('now') WHERE id=?`).run(loan.id);
+    logEvent(loan.id, req.user.id, 'repaid', null);
+  }
+
+  res.json({
+    loan: db.prepare('SELECT * FROM loans WHERE id = ?').get(loan.id),
+    amount_paid: newPaid,
+    balance: Math.max(0, Math.round((loan.total_repayable - newPaid) * 100) / 100),
+    fully_paid: fullyPaid,
+  });
 });
 
 // Member: request an extension

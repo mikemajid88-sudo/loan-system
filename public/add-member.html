@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Add member — Sasa Loan</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Sasa <span class="mark">Loan</span></div>
+    <nav>
+      <span class="user-chip" id="userChip"></span>
+      <a href="/staff.html">Dashboard</a>
+      <a href="#" onclick="logout()">Sign out</a>
+    </nav>
+  </div>
+
+  <div class="wrap narrow">
+    <h1>Add a verified member</h1>
+    <p class="muted">For walk-in members you can verify in person. This account is created already verified — no separate KYC review needed.</p>
+    <div class="panel">
+      <form id="addForm">
+        <label for="full_name">Full name</label>
+        <input id="full_name" required />
+
+        <label for="email">Email</label>
+        <input id="email" type="email" required />
+
+        <label for="phone">WhatsApp phone number</label>
+        <input id="phone" required placeholder="e.g. 0712345678" />
+
+        <label for="national_id">National ID number</label>
+        <input id="national_id" />
+
+        <label for="password">Temporary password (for the member to log in)</label>
+        <input id="password" required minlength="6" />
+
+        <label>Photo of their ID document</label>
+        <div class="capture-box" id="idCaptureBox">
+          <div class="capture-label">Hold their ID steady in frame</div>
+          <video id="idVideo" playsinline muted class="hidden"></video>
+          <canvas id="idCanvas" class="hidden"></canvas>
+          <img id="idPreview" class="captured-preview hidden" />
+          <div class="capture-actions">
+            <button type="button" class="btn btn-outline" id="idStartBtn">Open camera</button>
+            <button type="button" class="btn btn-primary hidden" id="idCaptureBtn">Capture</button>
+            <button type="button" class="btn btn-outline hidden" id="idRetakeBtn">Retake</button>
+          </div>
+          <div class="capture-status hidden" id="idStatus">✓ ID photo captured</div>
+        </div>
+
+        <label style="margin-top:24px;">Live selfie of the member</label>
+        <div class="capture-box" id="selfieCaptureBox">
+          <div class="capture-label">Have them look straight at the camera</div>
+          <video id="selfieVideo" playsinline muted class="hidden"></video>
+          <canvas id="selfieCanvas" class="hidden"></canvas>
+          <img id="selfiePreview" class="captured-preview hidden" />
+          <div class="capture-actions">
+            <button type="button" class="btn btn-outline" id="selfieStartBtn">Open camera</button>
+            <button type="button" class="btn btn-primary hidden" id="selfieCaptureBtn">Capture</button>
+            <button type="button" class="btn btn-outline hidden" id="selfieRetakeBtn">Retake</button>
+          </div>
+          <div class="capture-status hidden" id="selfieStatus">✓ Selfie captured</div>
+        </div>
+
+        <button class="btn btn-primary btn-block" type="submit" id="submitBtn" style="margin-top:24px;">Create member account</button>
+      </form>
+      <div id="errorBox" class="error-msg hidden"></div>
+      <div id="successBox" class="success-msg hidden"></div>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/camera.js"></script>
+  <script>
+    const user = Auth.requireRole(['loan_officer','credit_manager','admin','super_admin']);
+    if (user) document.getElementById('userChip').textContent = user.full_name;
+
+    let idPhotoData = null;
+    let selfiePhotoData = null;
+
+    function wireCapture({ prefix, facingMode, onCaptured }) {
+      const video = document.getElementById(prefix + 'Video');
+      const canvas = document.getElementById(prefix + 'Canvas');
+      const preview = document.getElementById(prefix + 'Preview');
+      const startBtn = document.getElementById(prefix + 'StartBtn');
+      const captureBtn = document.getElementById(prefix + 'CaptureBtn');
+      const retakeBtn = document.getElementById(prefix + 'RetakeBtn');
+      const status = document.getElementById(prefix + 'Status');
+      const cam = createCameraCapture({ videoEl: video, canvasEl: canvas, facingMode });
+
+      startBtn.addEventListener('click', async () => {
+        try {
+          await cam.start();
+          video.classList.remove('hidden');
+          startBtn.classList.add('hidden');
+          captureBtn.classList.remove('hidden');
+        } catch (e) { alert('Could not access camera: ' + e.message); }
+      });
+      captureBtn.addEventListener('click', () => {
+        const dataUrl = cam.capture();
+        video.classList.add('hidden');
+        captureBtn.classList.add('hidden');
+        preview.src = dataUrl;
+        preview.classList.remove('hidden');
+        retakeBtn.classList.remove('hidden');
+        status.classList.remove('hidden');
+        onCaptured(dataUrl);
+      });
+      retakeBtn.addEventListener('click', async () => {
+        preview.classList.add('hidden');
+        retakeBtn.classList.add('hidden');
+        status.classList.add('hidden');
+        onCaptured(null);
+        try { await cam.start(); video.classList.remove('hidden'); captureBtn.classList.remove('hidden'); }
+        catch (e) { alert('Could not access camera: ' + e.message); }
+      });
+    }
+
+    wireCapture({ prefix: 'id', facingMode: 'environment', onCaptured: (d) => { idPhotoData = d; } });
+    wireCapture({ prefix: 'selfie', facingMode: 'user', onCaptured: (d) => { selfiePhotoData = d; } });
+
+    document.getElementById('addForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('submitBtn');
+      const errorBox = document.getElementById('errorBox');
+      const successBox = document.getElementById('successBox');
+      errorBox.classList.add('hidden');
+      successBox.classList.add('hidden');
+
+      if (!idPhotoData || !selfiePhotoData) {
+        errorBox.textContent = 'Please capture both the ID photo and a live selfie.';
+        errorBox.classList.remove('hidden');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Creating…';
+      try {
+        const body = {
+          full_name: document.getElementById('full_name').value.trim(),
+          email: document.getElementById('email').value.trim(),
+          phone: document.getElementById('phone').value.trim(),
+          national_id: document.getElementById('national_id').value.trim(),
+          password: document.getElementById('password').value,
+          id_photo: idPhotoData,
+          selfie_photo: selfiePhotoData,
+        };
+        await api('/auth/members', { method: 'POST', body });
+        successBox.textContent = 'Member created and verified. They can now log in with the temporary password.';
+        successBox.classList.remove('hidden');
+        document.getElementById('addForm').reset();
+      } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Create member account';
+      }
+    });
+  </script>
+</body>
+</html>

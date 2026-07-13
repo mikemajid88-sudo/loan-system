@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Dashboard — Sasa Loan</title>
 <link rel="stylesheet" href="/css/style.css" />
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 </head>
 <body>
   <div class="topbar">
@@ -13,8 +12,9 @@
     <nav>
       <span class="user-chip" id="userChip"></span>
       <a href="/users.html" id="usersLink" class="hidden">Manage users</a>
-      <a href="/settings.html" id="settingsLink" class="hidden">Settings</a>
-      <a href="/account.html">Account</a>
+      <a href="/reports.html" id="reportsLink" class="hidden">Reports</a>
+      <a href="/settings.html" id="settingsLink" class="hidden">System settings</a>
+      <a href="/account.html">User settings</a>
       <a href="#" onclick="logout()">Sign out</a>
     </nav>
   </div>
@@ -23,41 +23,48 @@
     <h1>Dashboard</h1>
     <div class="stat-grid" id="statGrid"></div>
 
-    <section style="margin-bottom:32px;">
-      <h2 style="font-size:18px;">Pending member registrations</h2>
+    <div class="grid-auto" style="margin-bottom:32px;">
+      <a href="/add-member.html" class="module-card">
+        <span class="icon">➕</span>
+        <div class="title">Add member</div>
+        <div class="desc">Register a walk-in member directly, already verified</div>
+      </a>
+      <a href="#" class="module-card" onclick="document.getElementById('searchInput').focus(); return false;">
+        <span class="icon">🔍</span>
+        <div class="title">Search</div>
+        <div class="desc">Find a member or loan by name or phone</div>
+      </a>
+    </div>
+
+    <div class="panel" style="margin-bottom:32px;">
+      <label for="searchInput">Search members or loans</label>
+      <input id="searchInput" placeholder="Type a name or phone number…" />
+      <div id="searchResults"></div>
+    </div>
+
+    <section style="margin-bottom:32px;" id="kycWrap">
+      <h2 class="section-title">Pending member registrations</h2>
       <div id="kycSection"><p class="muted">Loading…</p></div>
     </section>
 
-    <section style="margin-bottom:32px;">
-      <h2 style="font-size:18px;">Pending loan applications</h2>
+    <section style="margin-bottom:32px;" id="pendingWrap">
+      <h2 class="section-title">Pending loan applications</h2>
       <div id="pendingLoansSection"><p class="muted">Loading…</p></div>
     </section>
 
-    <section style="margin-bottom:32px;">
-      <h2 style="font-size:18px;">Pending extension requests</h2>
+    <section style="margin-bottom:32px;" id="extWrap">
+      <h2 class="section-title">Pending extension requests</h2>
       <div id="extensionsSection"><p class="muted">Loading…</p></div>
     </section>
 
-    <section style="margin-bottom:32px;">
-      <h2 style="font-size:18px;">Active loans</h2>
+    <section style="margin-bottom:32px;" id="activeWrap">
+      <h2 class="section-title">Active loans</h2>
       <div id="activeSection"><p class="muted">Loading…</p></div>
     </section>
 
-    <section style="margin-bottom:32px;">
-      <h2 style="font-size:18px;">Overdue loans</h2>
+    <section style="margin-bottom:32px;" id="overdueWrap">
+      <h2 class="section-title">Overdue loans</h2>
       <div id="overdueSection"><p class="muted">Loading…</p></div>
-    </section>
-
-    <section id="cashflowSection" class="hidden" style="margin-bottom:32px;">
-      <h2 style="font-size:18px;">Cash flow analysis</h2>
-      <div class="panel">
-        <div class="field-row" style="margin-bottom:20px;">
-          <div><span class="muted">Outstanding</span><br/><strong id="cfOutstanding">—</strong></div>
-          <div><span class="muted">Overdue amount</span><br/><strong id="cfOverdue">—</strong></div>
-          <div><span class="muted">Total repaid (all time)</span><br/><strong id="cfRepaid">—</strong></div>
-        </div>
-        <canvas id="cashflowChart" height="90"></canvas>
-      </div>
     </section>
   </div>
 
@@ -72,12 +79,17 @@
     if (isSuperAdmin) document.getElementById('usersLink').classList.remove('hidden');
     if (isAdminTier) {
       document.getElementById('settingsLink').classList.remove('hidden');
-      document.getElementById('cashflowSection').classList.remove('hidden');
+      document.getElementById('reportsLink').classList.remove('hidden');
+    }
+    // Loan Officer without Credit Manager doesn't need active/overdue management view cluttering their dashboard
+    if (isLoanOfficer && !isCreditManager && !isAdminTier) {
+      document.getElementById('activeWrap').classList.add('hidden');
+      document.getElementById('overdueWrap').classList.add('hidden');
     }
 
     async function loadStats() {
       try {
-        const { counts, totalMembers, pendingVerification, disbursedTotal } = await api('/loans/stats/summary');
+        const { counts, pendingVerification, disbursedTotal } = await api('/loans/stats/summary');
         const byStatus = Object.fromEntries(counts.map(c => [c.status, c.count]));
         const cards = [
           { lbl: 'Pending registrations', num: pendingVerification },
@@ -98,12 +110,12 @@
       try {
         const { users } = await api('/auth/pending-verifications');
         if (users.length === 0) { el.innerHTML = `<div class="panel empty-state"><p>No pending registrations.</p></div>`; return; }
-        el.innerHTML = `<div class="card-list">${users.map(u => `
+        el.innerHTML = `<div class="grid-auto">${users.map(u => `
           <div class="card-item">
             <div class="row-flex" style="justify-content:space-between;">
               <strong>${u.full_name}</strong><span class="muted">${fmtDate(u.created_at)}</span>
             </div>
-            <div class="muted" style="margin:4px 0 10px;">${u.email} · ${u.phone}${u.national_id ? ' · ID ' + u.national_id : ''}</div>
+            <div class="muted" style="margin:4px 0 10px; font-size:13px;">${u.email} · ${u.phone}${u.national_id ? ' · ID ' + u.national_id : ''}</div>
             <div class="field-row">
               <div><span class="muted" style="font-size:12px;">ID document</span><img src="${u.id_photo}" style="width:100%; border-radius:6px; margin-top:4px;" /></div>
               <div><span class="muted" style="font-size:12px;">Selfie</span><img src="${u.selfie_photo}" style="width:100%; border-radius:6px; margin-top:4px;" /></div>
@@ -132,10 +144,15 @@
     async function loadPendingLoans() {
       const el = document.getElementById('pendingLoansSection');
       try {
-        const [l1, l2] = await Promise.all([api('/loans?status=pending_level1'), api('/loans?status=pending_level2')]);
+        const calls = [];
+        if (!isCreditManager || isLoanOfficer || isAdminTier) calls.push(api('/loans?status=pending_level1'));
+        else calls.push(Promise.resolve({ loans: [] }));
+        if (!isLoanOfficer || isCreditManager || isAdminTier) calls.push(api('/loans?status=pending_level2'));
+        else calls.push(Promise.resolve({ loans: [] }));
+        const [l1, l2] = await Promise.all(calls);
         const all = [...l1.loans.map(l => ({ ...l, stage: 'Level 1' })), ...l2.loans.map(l => ({ ...l, stage: 'Level 2' }))];
         if (all.length === 0) { el.innerHTML = `<div class="panel empty-state"><p>Nothing awaiting review.</p></div>`; return; }
-        el.innerHTML = `<div class="card-list">${all.map(l => `
+        el.innerHTML = `<div class="grid-auto">${all.map(l => `
           <div class="card-item clickable" onclick="window.location.href='/loan.html?id=${l.id}'">
             <div class="row-flex" style="justify-content:space-between;">
               <strong>${l.full_name}</strong>
@@ -151,10 +168,10 @@
       try {
         const { extensions } = await api('/loans/extensions/pending');
         if (extensions.length === 0) { el.innerHTML = `<div class="panel empty-state"><p>No pending extension requests.</p></div>`; return; }
-        el.innerHTML = `<div class="card-list">${extensions.map(e => `
+        el.innerHTML = `<div class="grid-auto">${extensions.map(e => `
           <div class="card-item">
             <strong>${e.full_name}</strong> — KES ${money(e.amount)}, due ${e.due_date}
-            <p style="margin:8px 0;">${e.reason}</p>
+            <p style="margin:8px 0; font-size:14px;">${e.reason}</p>
             <div class="row-flex">
               <button class="btn btn-primary" onclick="reviewExt(${e.id}, 'approved')">Approve</button>
               <button class="btn btn-danger" onclick="reviewExt(${e.id}, 'rejected')">Reject</button>
@@ -174,7 +191,7 @@
       try {
         const { loans } = await api(`/loans?status=${status}`);
         if (loans.length === 0) { el.innerHTML = `<div class="panel empty-state"><p>None right now.</p></div>`; return; }
-        el.innerHTML = `<div class="card-list">${loans.map(l => `
+        el.innerHTML = `<div class="grid-auto">${loans.map(l => `
           <div class="card-item clickable" onclick="window.location.href='/loan.html?id=${l.id}'">
             <div class="row-flex" style="justify-content:space-between;">
               <strong>${l.full_name}</strong>
@@ -185,28 +202,25 @@
       } catch (err) { el.innerHTML = `<div class="error-msg">${err.message}</div>`; }
     }
 
-    async function loadCashflow() {
-      if (!isAdminTier) return;
-      try {
-        const data = await api('/loans/stats/cashflow');
-        document.getElementById('cfOutstanding').textContent = 'KES ' + money(data.outstanding);
-        document.getElementById('cfOverdue').textContent = 'KES ' + money(data.overdueAmount);
-        document.getElementById('cfRepaid').textContent = 'KES ' + money(data.totalRepaidAllTime);
-
-        const ctx = document.getElementById('cashflowChart');
-        new Chart(ctx, {
-          type: 'bar',
-          data: {
-            labels: data.trend.map(t => t.period),
-            datasets: [
-              { label: 'Disbursed', data: data.trend.map(t => t.disbursed), backgroundColor: '#1F3A5F' },
-              { label: 'Repaid', data: data.trend.map(t => t.repaid), backgroundColor: '#2E7D5B' },
-            ],
-          },
-          options: { responsive: true, scales: { y: { beginAtZero: true } } },
-        });
-      } catch (e) { /* non-fatal */ }
-    }
+    let searchTimer;
+    document.getElementById('searchInput').addEventListener('input', (e) => {
+      clearTimeout(searchTimer);
+      const q = e.target.value.trim();
+      const box = document.getElementById('searchResults');
+      if (q.length < 2) { box.innerHTML = ''; return; }
+      searchTimer = setTimeout(async () => {
+        try {
+          const { members, loans } = await api(`/search?q=${encodeURIComponent(q)}`);
+          if (members.length === 0 && loans.length === 0) { box.innerHTML = `<p class="muted" style="margin-top:10px;">No results.</p>`; return; }
+          box.innerHTML = `
+            ${members.length ? `<p class="muted" style="margin-top:12px; font-size:12px; text-transform:uppercase;">Members</p>` + members.map(m =>
+              `<div style="padding:8px 0; border-bottom:1px solid var(--line);">${m.full_name} · ${m.phone} ${badge(m.verification_status === 'approved' ? 'approved' : 'pending')}</div>`).join('') : ''}
+            ${loans.length ? `<p class="muted" style="margin-top:12px; font-size:12px; text-transform:uppercase;">Loans</p>` + loans.map(l =>
+              `<div style="padding:8px 0; border-bottom:1px solid var(--line);"><a href="/loan.html?id=${l.id}">${l.full_name} — KES ${money(l.amount)} ${badge(l.status)}</a></div>`).join('') : ''}
+          `;
+        } catch (e) { /* ignore */ }
+      }, 300);
+    });
 
     loadStats();
     loadKyc();
@@ -214,7 +228,6 @@
     loadExtensions();
     loadByStatus('disbursed', 'activeSection');
     loadByStatus('defaulted', 'overdueSection');
-    loadCashflow();
   </script>
 </body>
 </html>

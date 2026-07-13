@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS loans (
   guarantor_id INTEGER REFERENCES users(id),
   guarantor_status TEXT NOT NULL DEFAULT 'pending' CHECK(guarantor_status IN ('pending','approved','declined')),
   guarantor_responded_at TEXT,
+  guarantor_liability_amount REAL,
 
   level1_status TEXT NOT NULL DEFAULT 'pending' CHECK(level1_status IN ('pending','passed','rejected')),
   level1_reviewer_id INTEGER REFERENCES users(id),
@@ -88,6 +89,15 @@ CREATE TABLE IF NOT EXISTS loan_extensions (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS repayments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  loan_id INTEGER NOT NULL REFERENCES loans(id),
+  amount REAL NOT NULL,
+  note TEXT,
+  recorded_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS loan_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   loan_id INTEGER NOT NULL REFERENCES loans(id),
@@ -110,6 +120,7 @@ CREATE INDEX IF NOT EXISTS idx_loans_user ON loans(user_id);
 CREATE INDEX IF NOT EXISTS idx_loans_status ON loans(status);
 CREATE INDEX IF NOT EXISTS idx_loans_guarantor ON loans(guarantor_id);
 CREATE INDEX IF NOT EXISTS idx_users_verification ON users(verification_status);
+CREATE INDEX IF NOT EXISTS idx_repayments_loan ON repayments(loan_id);
 `);
 
 module.exports = db;
