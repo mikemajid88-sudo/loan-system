@@ -30,13 +30,20 @@ function publicUser(user) {
 
 // Member self-registration with KYC documents
 router.post('/register', (req, res) => {
-  const { full_name, email, phone, national_id, password, id_photo, selfie_photo } = req.body;
+  const {
+    full_name, email, phone, national_id, date_of_birth, gender, residential_address,
+    occupation, monthly_income_range, next_of_kin_name, next_of_kin_phone,
+    consent, password, id_photo, selfie_photo,
+  } = req.body;
 
-  if (!full_name || !email || !phone || !password) {
-    return res.status(400).json({ error: 'full_name, email, phone and password are required' });
+  if (!full_name || !email || !phone || !national_id || !date_of_birth || !residential_address || !next_of_kin_name || !next_of_kin_phone || !password) {
+    return res.status(400).json({ error: 'Please complete all required personal, contact and next-of-kin details' });
   }
-  if (password.length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  if (password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  }
+  if (!consent) {
+    return res.status(400).json({ error: 'You must accept the privacy and credit assessment consent' });
   }
   if (!id_photo || !selfie_photo) {
     return res.status(400).json({ error: 'ID photo and a live selfie are both required' });
@@ -44,14 +51,20 @@ router.post('/register', (req, res) => {
 
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase());
   if (existing) return res.status(409).json({ error: 'Email already registered' });
+  const existingId = db.prepare('SELECT id FROM users WHERE national_id = ?').get(national_id.trim());
+  if (existingId) return res.status(409).json({ error: 'This National ID is already registered' });
 
   const hash = bcrypt.hashSync(password, 10);
   const info = db
     .prepare(
-      `INSERT INTO users (full_name, email, phone, national_id, password_hash, roles, verification_status, id_photo, selfie_photo)
-       VALUES (?, ?, ?, ?, ?, 'member', 'pending', ?, ?)`
+      `INSERT INTO users (full_name, email, phone, national_id, date_of_birth, gender, residential_address,
+         occupation, monthly_income_range, next_of_kin_name, next_of_kin_phone, consent_at, password_hash,
+         roles, verification_status, id_photo, selfie_photo)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 'member', 'pending', ?, ?)`
     )
-    .run(full_name, email.toLowerCase(), phone, national_id || null, hash, id_photo, selfie_photo);
+    .run(full_name.trim(), email.toLowerCase(), phone.trim(), national_id.trim(), date_of_birth,
+      gender || null, residential_address.trim(), occupation || null, monthly_income_range || null,
+      next_of_kin_name.trim(), next_of_kin_phone.trim(), hash, id_photo, selfie_photo);
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
   const token = signToken(user);
@@ -114,7 +127,8 @@ router.get('/verified-members', requireAuth, requireAnyRole('member'), (req, res
 router.get('/pending-verifications', requireAuth, requireAnyRole(...ALL_STAFF_ROLES), blockIfMustChangePassword, (req, res) => {
   const rows = db
     .prepare(
-      `SELECT id, full_name, email, phone, national_id, id_photo, selfie_photo, created_at
+      `SELECT id, full_name, email, phone, national_id, date_of_birth, gender, residential_address,
+              occupation, monthly_income_range, next_of_kin_name, next_of_kin_phone, id_photo, selfie_photo, created_at
        FROM users WHERE verification_status = 'pending' AND roles = 'member'
        ORDER BY created_at ASC`
     )

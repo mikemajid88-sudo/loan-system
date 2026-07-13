@@ -16,6 +16,14 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE NOT NULL,
   phone TEXT NOT NULL,
   national_id TEXT,
+  date_of_birth TEXT,
+  gender TEXT,
+  residential_address TEXT,
+  occupation TEXT,
+  monthly_income_range TEXT,
+  next_of_kin_name TEXT,
+  next_of_kin_phone TEXT,
+  consent_at TEXT,
   password_hash TEXT NOT NULL,
   -- Comma-separated list of roles. A Member is always exactly 'member'.
   -- Staff-side accounts hold one or more of: super_admin, admin, loan_officer, credit_manager
@@ -122,5 +130,22 @@ CREATE INDEX IF NOT EXISTS idx_loans_guarantor ON loans(guarantor_id);
 CREATE INDEX IF NOT EXISTS idx_users_verification ON users(verification_status);
 CREATE INDEX IF NOT EXISTS idx_repayments_loan ON repayments(loan_id);
 `);
+
+// Lightweight migrations keep existing installations compatible as member
+// registration details are added over time.
+const userColumns = [
+  ['date_of_birth', 'TEXT'],
+  ['gender', 'TEXT'],
+  ['residential_address', 'TEXT'],
+  ['occupation', 'TEXT'],
+  ['monthly_income_range', 'TEXT'],
+  ['next_of_kin_name', 'TEXT'],
+  ['next_of_kin_phone', 'TEXT'],
+  ['consent_at', 'TEXT'],
+];
+const existingUserColumns = new Set(db.prepare('PRAGMA table_info(users)').all().map(column => column.name));
+for (const [name, type] of userColumns) {
+  if (!existingUserColumns.has(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${type}`);
+}
 
 module.exports = db;
