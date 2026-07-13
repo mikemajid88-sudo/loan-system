@@ -17,7 +17,11 @@
   </div>
 
   <div class="wrap narrow">
-    <h1>Apply for a loan</h1>
+    <div class="page-intro">
+      <div class="eyebrow">New application</div>
+      <h1>Apply for a loan</h1>
+      <p class="muted">Review the repayment estimate before submitting.</p>
+    </div>
     <div class="panel">
       <form id="applyForm">
         <label for="amount" id="amountLabel">Loan amount (KES)</label>
@@ -36,7 +40,7 @@
         <label for="purpose">Purpose of loan</label>
         <textarea id="purpose" placeholder="e.g. Stock for my shop, school fees, medical bill…"></textarea>
 
-        <div id="calcPreview" class="hidden" style="margin-top:18px; padding:14px; background:#F0F3F7; border-radius:6px; font-size:14px;"></div>
+        <div id="calcPreview" class="hidden panel" style="margin-top:18px; padding:16px; background:#F8FAFC;"></div>
 
         <button class="btn btn-primary btn-block" type="submit" id="submitBtn">Submit application</button>
       </form>

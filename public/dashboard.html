@@ -19,9 +19,11 @@
   <div class="wrap">
     <div id="guarantorSection"></div>
 
-    <div class="row-flex" style="justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap:10px;">
-      <h1 style="margin:0;">My loans</h1>
-      <a href="/apply.html" class="btn btn-amber hidden" id="applyBtn">Apply for a loan</a>
+    <div class="hero-card" style="margin-bottom:20px;">
+      <div class="eyebrow">My Sasa Loan</div>
+      <h1 style="margin:0;">Hello, <span id="firstName">there</span></h1>
+      <p class="muted">Track your loans, repayments, and next steps in one place.</p>
+      <a href="/apply.html" class="btn btn-amber hidden" id="applyBtn" style="margin-top:14px;">Apply for a loan</a>
     </div>
 
     <div id="content">
@@ -32,7 +34,10 @@
   <script src="/js/api.js"></script>
   <script>
     const user = Auth.requireRole(['member']);
-    if (user) document.getElementById('userChip').textContent = user.full_name;
+    if (user) {
+      document.getElementById('userChip').textContent = user.full_name;
+      document.getElementById('firstName').textContent = user.full_name.split(' ')[0];
+    }
 
     function statusLabel(l) {
       const map = {

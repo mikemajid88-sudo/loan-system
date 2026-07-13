@@ -20,14 +20,18 @@
   </div>
 
   <div class="wrap">
-    <h1>Dashboard</h1>
+    <div class="page-intro">
+      <div class="eyebrow">Operations centre</div>
+      <h1>Good day, <span id="firstName">there</span></h1>
+      <p class="muted">Review what needs attention and take the next action.</p>
+    </div>
     <div class="stat-grid" id="statGrid"></div>
 
-    <div class="grid-auto" style="margin-bottom:32px;">
+    <div class="quick-actions">
       <a href="/add-member.html" class="module-card">
         <span class="icon">➕</span>
         <div class="title">Add member</div>
-        <div class="desc">Register a walk-in member directly, already verified</div>
+        <div class="desc">Capture details and documents in one guided flow</div>
       </a>
       <a href="#" class="module-card" onclick="document.getElementById('searchInput').focus(); return false;">
         <span class="icon">🔍</span>
@@ -71,7 +75,10 @@
   <script src="/js/api.js"></script>
   <script>
     const user = Auth.requireRole(['loan_officer','credit_manager','admin','super_admin']);
-    if (user) document.getElementById('userChip').textContent = `${user.full_name} (${user.roles.join(', ')})`;
+    if (user) {
+      document.getElementById('userChip').textContent = `${user.full_name} (${user.roles.join(', ')})`;
+      document.getElementById('firstName').textContent = user.full_name.split(' ')[0];
+    }
     const isSuperAdmin = Auth.hasAnyRole(user, ['super_admin']);
     const isAdminTier = Auth.hasAnyRole(user, ['admin', 'super_admin']);
     const isLoanOfficer = Auth.hasAnyRole(user, ['loan_officer']);
