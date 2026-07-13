@@ -29,7 +29,7 @@
     const params = new URLSearchParams(window.location.search);
     const loanId = params.get('id');
 
-    const STATUS_LABELS = {
+    const STAFF_STATUS_LABELS = {
       awaiting_guarantor: 'Awaiting guarantor approval',
       pending_level1: 'Level 1 review pending',
       pending_level2: 'Level 2 review pending',
@@ -38,6 +38,17 @@
       disbursed: 'Active (disbursed)',
       repaid: 'Repaid',
       defaulted: 'Overdue / defaulted',
+    };
+
+    const MEMBER_STATUS_LABELS = {
+      awaiting_guarantor: 'Awaiting guarantor approval',
+      pending_level1: 'Under review',
+      pending_level2: 'Under review',
+      approved: 'Approved',
+      rejected: 'Not approved',
+      disbursed: 'Disbursed',
+      repaid: 'Repaid',
+      defaulted: 'Overdue',
     };
 
     async function load() {
@@ -49,6 +60,7 @@
         const isStaff = Auth.hasAnyRole(user, ['loan_officer','credit_manager','admin','super_admin']);
         const isOwner = user.id === loan.user_id;
         const isGuarantor = user.id === loan.guarantor_id;
+        const statusLabels = isStaff ? STAFF_STATUS_LABELS : MEMBER_STATUS_LABELS;
 
         let actions = '';
         if (isLoanOfficer && loan.status === 'pending_level1') {
@@ -132,7 +144,7 @@
             <h1 style="margin:0;">Loan #${loan.id}</h1>
             ${countdownPill(loan.days_remaining, loan.status)}
           </div>
-          <p class="muted" style="margin-top:-14px;">${STATUS_LABELS[loan.status] || loan.status}</p>
+          <p class="muted" style="margin-top:-14px;">${statusLabels[loan.status] || loan.status}</p>
 
           <div class="grid-2" style="margin-bottom:20px;">
             <div class="panel">
@@ -180,11 +192,14 @@
 
           ${repaymentBox}
 
+          ${isStaff ? `
           <div class="panel" style="margin-bottom:20px;">
-            <h3 style="margin-top:0;">Approval trail</h3>
+            <h3 style="margin-top:0;">Internal approval trail</h3>
             <p><strong>Level 1 (Loan Officer):</strong> ${loan.level1_status}${loan.level1_note ? ' — ' + loan.level1_note : ''}</p>
             <p><strong>Level 2 (Credit Manager):</strong> ${loan.level2_status}${loan.level2_note ? ' — ' + loan.level2_note : ''}</p>
           </div>
+
+          ` : ''}
 
           ${extensionBox}
 
@@ -197,11 +212,11 @@
             </div>` : ''}
 
           <div class="panel">
-            <h3 style="margin-top:0;">History</h3>
+            <h3 style="margin-top:0;">${isStaff ? 'History' : 'Loan updates'}</h3>
             <table>
               <thead><tr><th>Date</th><th>Action</th><th>Note</th></tr></thead>
               <tbody>
-                ${events.map(ev => `
+                ${(isStaff ? events : events.filter(ev => ['applied', 'disbursed', 'repayment_recorded', 'repaid', 'extension_requested', 'extension_approved', 'extension_rejected', 'defaulted'].includes(ev.action))).map(ev => `
                   <tr>
                     <td data-label="Date">${fmtDate(ev.created_at)}</td>
                     <td data-label="Action">${ev.action.replace(/_/g,' ')}</td>
