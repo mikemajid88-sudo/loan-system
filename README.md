@@ -1,190 +1,75 @@
-# Sasa Loan — Loan Management System
+# Sasa Loan
 
-A mobile-first micro-lending platform for up to ~500 members: KYC-verified
-registration, guarantor-backed loans, role-based 2-level approval
-(Loan Officer → Credit Manager), 30-day fixed-term loans, manually-pushed
-WhatsApp notifications, and self-service extension requests.
+Micro-lending management system. See the full functional specification
+(22 sections, all design decisions confirmed) for complete business rules.
 
-## Roles
+## Status: Clean rebuild — Phase 0 + Phase 1 only
 
-| Role | Can do |
-|---|---|
-| **Super Admin** | Everything — manage all staff accounts (create/edit/suspend/change roles), settings, cash flow analytics, KYC, disburse/repay, extensions, push WhatsApp |
-| **Admin** | Settings, cash flow analytics, KYC, extensions, push WhatsApp (never personally does Level 1/2 review) |
-| **Loan Officer** | Level 1 loan review, KYC, extensions, push WhatsApp |
-| **Credit Manager** | Level 2 loan review, disburse, mark repaid, KYC, extensions, push WhatsApp |
-| **Member** | Register, apply for loans, act as guarantor |
+This is a **from-scratch rebuild**, replacing the earlier v4 codebase entirely.
+Nothing from v4 was ported over — the schema below was built directly from
+the finalized spec, so it doesn't carry forward any of v4's unverified
+assumptions or half-applied migrations.
 
-A single person **can** hold both Loan Officer and Credit Manager (or any
-combination) — the system still blocks the *same person* from doing both
-Level 1 and Level 2 on the same loan, regardless of which roles they hold.
+**What's built:**
+- Full database schema (`src/db.js`) — every table the spec describes, created
+  up front. Includes the `loans.status` CHECK constraint with the complete
+  status list (including `written_off` / `pending_clarification`, which
+  required an awkward table-rebuild workaround in v4 — not an issue here
+  since this is a fresh table).
+- Loan math (`src/utils/loanMath.js`) — flat-rate interest, installment
+  schedule generation, payment application with overpayment rollforward,
+  PAR aging buckets. Pure functions, fully unit tested.
+- Encryption helper (`src/utils/encryption.js`) — AES-256-GCM for ID numbers
+  and KYC photos at rest.
+- Minimal server bootstrap (`server.js`) — initializes the DB and exposes a
+  health check. **No business route logic yet — intentional.**
 
-Only a **Super Admin** can create/edit/suspend other accounts, from
-**Manage users** (`/users.html`) in the app — no command line needed once
-the first Super Admin exists. New accounts get a temporary password and
-are **forced to change it** before doing anything else.
+**What's NOT built yet (by design — stopping here for review):**
+- Auth routes (login, lockout, password reset)
+- Registration/KYC wizard + review queue
+- Loan application, approval, disbursement, repayment routes
+- Member portal
+- Reporting
+- Notifications (WhatsApp, in-app)
+- Backups cron job
+- Frontend (public/)
 
-## How it works
-
-**Registration & KYC** — Member registers with a live camera capture of
-their ID and a selfie, account sits `pending` until any staff-side role
-approves/rejects it from the dashboard.
-
-**Applying for a loan** — amount (admin-configurable min/max), pick a
-guarantor from a dropdown of other verified Members (guarantor must log
-in and actively approve), pick a disbursement date (due date is fixed at
-30 days later, admin-configurable).
-
-**Approval — Level 1 (Loan Officer) → Level 2 (Credit Manager) → Disbursement (Credit Manager)**
-
-**WhatsApp — all messages are manual "push" buttons**, appearing
-contextually on the dashboard/loan page: KYC approval/rejection,
-guarantor notice, loan approval, disbursement notice, extension
-confirmation. Staff review the pre-filled message, edit if needed, and
-click send. **Due-date reminders (3 days out through due date) remain
-fully automatic**, since no one's watching at 2am.
-
-**Extensions** — Member submits a written request once disbursed (or
-overdue); any staff-side role approves/rejects. On approval: outstanding
-total + fresh interest becomes a new 30-day cycle — no penalty, can be
-requested again afterward, always requiring approval.
-
-**Dashboard** — sequential sections: pending registrations → pending loan
-applications → pending extensions → active loans → overdue loans, plus a
-**cash flow trend chart** (disbursed vs repaid by week) visible to
-Admin/Super Admin only.
-
-## Requirements
-
-- Node.js 18+, HTTPS in production (required for camera access on phones)
-
-## 1. Install & configure
+## Setup
 
 ```bash
-cd loan-system
 npm install
-cp .env.example .env   # then set a random JWT_SECRET
+cp .env.example .env
+# generate an encryption key and paste it into .env:
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+npm run test    # runs loan math unit tests
+npm start        # boots the server, initializes the DB, seeds a Super Admin
 ```
 
-## 2. First login
+On first boot, if no `super_admin` user exists, one is seeded using the
+`SEED_SUPERADMIN_*` env vars. If `SEED_SUPERADMIN_PASSWORD` is left blank, a
+random temp password is generated and printed to the console once — not
+stored anywhere else. The account is forced to change its password on first
+login (once auth routes exist).
 
-```
-Email:    admin@example.com
-Password: ChangeMe123!
-```
+## Database
 
-This is a **Super Admin** account, auto-created on first run. Sign in,
-you'll be forced to set a new password immediately, then go to
-**Manage users** to create your Loan Officer(s) and Credit Manager(s) —
-you need **at least one of each** for the approval flow to work, and they
-should ideally be different people (though the system allows one person
-to hold both roles if you assign it that way).
+SQLite via `better-sqlite3`, file path set by `DB_PATH` (defaults to
+`./data/sasa-loan.db`). On Render's free tier this has no persistent disk —
+acceptable for testing only, per the spec's known infrastructure risk.
 
-## 3. Run it
+## Tests
 
 ```bash
-npm start
-```
-Visit **http://localhost:3000**
-
-## WhatsApp messaging (optional, free)
-
-Without setup, push buttons still work — messages are logged to the
-console/database but not actually sent. To enable real sending at zero
-cost via Meta's direct Cloud API (no Twilio markup):
-
-1. Create a free Meta Business account, add the WhatsApp product to a
-   developer app at https://developers.facebook.com
-2. Get your **Phone Number ID** and a permanent **Access Token**
-3. Add to `.env`:
-   ```
-   WHATSAPP_PHONE_NUMBER_ID=your-id-here
-   WHATSAPP_ACCESS_TOKEN=your-token-here
-   ```
-4. Restart the app
-
-Default country code normalization is Kenya (254) for numbers starting
-with `0` — adjust in `src/utils/whatsapp.js` if needed.
-
-## Data storage
-
-Everything (including ID photos/selfies as base64) lives in one SQLite
-file at `data/loans.db`. Back up by copying that file — treat it as
-sensitive since it holds real ID documents.
-
-## Deploying
-
-Same as before (Render/Railway, no code changes needed) — see earlier
-notes. HTTPS is required for camera capture to work on phones, and a
-persistent disk matters more than ever now that real KYC documents and
-loan records are involved.
-
-## Project structure
-
-```
-loan-system/
-  server.js                Express entry point + reminder scheduler
-  create-staff.js            CLI fallback to create the very first account
-  src/
-    db.js                     SQLite schema (users w/ multi-role, loans, extensions, settings, whatsapp_log)
-    seed.js                   Creates default Super Admin on first run
-    middleware/auth.js         JWT auth, multi-role check, forced-password-change guard
-    routes/auth.js              register, login, KYC queue, verified-members list
-    routes/users.js             Super Admin: create/list/edit-roles/suspend staff accounts
-    routes/loans.js              apply, guarantor response, level1/level2, disburse, repay, extensions, cash flow
-    routes/settings.js           admin-editable loan parameters
-    routes/whatsapp.js           manual "push" send endpoint
-    utils/roles.js               multi-role parsing/checking helpers
-    utils/loanCalc.js            flat-rate repayment calculation
-    utils/settings.js            settings read/write helpers
-    utils/whatsapp.js            Meta Cloud API integration (stubbed until configured)
-    utils/reminders.js           hourly sweep: automatic due-date WhatsApp reminders + auto-default
-  public/                   Frontend (plain HTML/CSS/JS, mobile-first, no build step)
-    index.html, register.html, pending.html   Sign in / sign up / KYC-pending screen
-    dashboard.html, apply.html                 Member: my loans, guarantor requests, apply
-    staff.html                                 Sequential ops dashboard + cash flow chart (Chart.js via CDN)
-    users.html                                 Super Admin: manage staff accounts
-    settings.html                              Admin/Super Admin: loan parameters
-    loan.html                                  Shared detail page + all role-specific actions + WhatsApp push buttons
-    account.html                               Change password (handles forced first-login change)
-  data/loans.db             SQLite database (created on first run)
+npm test
 ```
 
-## Security notes before going live
+Runs `tests/loanMath.test.js` (21 tests) covering flat-rate interest,
+installment schedule generation (including the exact worked examples from
+the spec), overpayment rollforward, and PAR aging bucket logic — the areas
+flagged in the spec as most likely to contain subtle bugs given real money
+is involved.
 
-- Set a real, random `JWT_SECRET`
-- Serve over HTTPS (required for camera access anyway)
-- Back up `data/loans.db` regularly — it contains ID documents
+## Next step
 
-## What's new in this version
-
-**Repayment tracking** — Credit Managers record partial or full repayments
-against a loan (`/api/loans/:id/repayments`); the system tracks a running
-balance and automatically marks a loan `repaid` once fully paid. Full
-statement (amount paid, balance, each repayment with who recorded it) is
-on the loan detail page.
-
-**Guarantor liability** — every loan calculates a guarantor liability of
-**50% of the principal amount**. This is shown to the guarantor in plain
-language before they approve, and staff get a one-click WhatsApp button
-to notify the guarantor of their liability if the loan defaults.
-
-**Admin-created members** — any staff-side role can add an already-verified
-member directly from `/add-member.html`, using the same live camera
-capture as public registration (for walk-ins staff can vouch for).
-
-**Reports module** (`/reports.html`, Admin/Super Admin only) — portfolio
-at risk with aging buckets, cash flow trend chart, and CSV export of all
-loans/members.
-
-**Search** — staff can search members/loans by name or phone from the
-dashboard.
-
-**Reorganized navigation** — Dashboard, Reports, System settings (loan
-parameters + Manage users), User settings (change password), matching a
-"Loan Services / System Settings / User Settings" structure.
-
-**Redesigned dashboard** — grid-based cards throughout, and the dashboard
-now adapts by role: Loan Officers see KYC + Level 1 queue emphasized;
-Credit Managers see Level 2, active/overdue loans, and repayment
-recording; Admin/Super Admin get Reports and Manage Users in the nav.
+Review the schema and test results against the spec. Once confirmed, proceed
+to Phase 2 (Registration/KYC) per the build roadmap.

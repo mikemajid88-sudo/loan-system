@@ -1,39 +1,25 @@
 require('dotenv').config();
-const path = require('path');
 const express = require('express');
-const cors = require('cors');
+const { init } = require('./src/db');
 
-const authRoutes = require('./src/routes/auth');
-const loanRoutes = require('./src/routes/loans');
-const settingsRoutes = require('./src/routes/settings');
-const usersRoutes = require('./src/routes/users');
-const whatsappRoutes = require('./src/routes/whatsapp');
-const reportsRoutes = require('./src/routes/reports');
-const searchRoutes = require('./src/routes/search');
-const { ensureDefaultAdmin } = require('./src/seed');
-const { startReminderScheduler } = require('./src/utils/reminders');
-
-ensureDefaultAdmin();
+// Initializes schema + seeds (loan products, settings, super admin) on boot.
+// Safe to run every startup: uses CREATE TABLE IF NOT EXISTS / INSERT OR IGNORE.
+init();
 
 const app = express();
+app.use(express.json({ limit: '10mb' })); // KYC images arrive as base64 JSON payloads
+
+app.use(express.static('public'));
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// --- Route modules will be mounted here in Phase 2+ (Registration/KYC,
+// Loan Lifecycle, Member Portal, Reporting) once the schema is reviewed
+// and confirmed. Intentionally not built yet. ---
+
 const PORT = process.env.PORT || 3000;
-
-app.use(cors());
-// Higher limit than default, to allow base64-encoded ID photo + selfie uploads
-app.use(express.json({ limit: '15mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
-
-app.use('/api/auth', authRoutes);
-app.use('/api/loans', loanRoutes);
-app.use('/api/settings', settingsRoutes);
-app.use('/api/users', usersRoutes);
-app.use('/api/whatsapp', whatsappRoutes);
-app.use('/api/reports', reportsRoutes);
-app.use('/api/search', searchRoutes);
-
-app.get('/api/health', (req, res) => res.json({ ok: true }));
-
 app.listen(PORT, () => {
-  console.log(`Sasa Loan running at http://localhost:${PORT}`);
-  startReminderScheduler();
+  console.log(`Sasa Loan server listening on port ${PORT}`);
 });

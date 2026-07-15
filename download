@@ -1,0 +1,190 @@
+// Core loan math for Sasa Loan.
+// Deliberately kept as pure functions (no DB access) so they can be unit
+// tested in isolation, per Section 17: "these are the areas most likely
+// to contain subtle, hard-to-notice bugs given real money is involved."
+//
+// Interest model: FLAT RATE on original principal (Section 8). Does NOT
+// decrease as principal is repaid. Do not swap in reducing-balance math here.
+
+/** Rounds to 2 decimal places (currency), using standard half-up rounding. */
+function round2(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Flat-rate interest on the original principal for the full loan term.
+ * @param {number} principal
+ * @param {number} ratePercent - e.g. 10 for 10%
+ */
+function calculateFlatInterest(principal, ratePercent) {
+  if (principal < 0 || ratePercent < 0) {
+    throw new Error('principal and ratePercent must be non-negative');
+  }
+  return round2(principal * (ratePercent / 100));
+}
+
+/**
+ * Total amount repayable: principal + flat interest.
+ */
+function calculateTotalRepayable(principal, ratePercent) {
+  return round2(principal + calculateFlatInterest(principal, ratePercent));
+}
+
+/**
+ * Adds `days` calendar days to a date. Returns a new Date, does not mutate input.
+ */
+function addDays(date, days) {
+  const result = new Date(date.getTime());
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+/**
+ * Builds the installment schedule for a loan at disbursement time.
+ * Even single-payment (Tier 1) loans get exactly one row, so downstream
+ * repayment logic can treat every loan uniformly (Section 22 design note).
+ *
+ * Equal installments: total repayable divided evenly across installmentCount,
+ * with any rounding remainder (down to the cent) absorbed by the LAST
+ * installment, so the sum of installments always exactly equals total repayable.
+ *
+ * Due dates are spread evenly across the term: interval = termDays / installmentCount,
+ * due_date for installment N = disbursementDate + (interval * N) days.
+ *
+ * @param {object} params
+ * @param {number} params.principal
+ * @param {number} params.ratePercent
+ * @param {number} params.installmentCount
+ * @param {number} params.termDays
+ * @param {Date} params.disbursementDate
+ * @returns {Array<{installment_number: number, due_date: Date, amount_due: number}>}
+ */
+function buildInstallmentSchedule({ principal, ratePercent, installmentCount, termDays, disbursementDate }) {
+  if (!Number.isInteger(installmentCount) || installmentCount < 1) {
+    throw new Error('installmentCount must be a positive integer');
+  }
+  if (termDays <= 0) {
+    throw new Error('termDays must be positive');
+  }
+
+  const totalRepayable = calculateTotalRepayable(principal, ratePercent);
+  const baseInstallment = round2(totalRepayable / installmentCount);
+  const intervalDays = termDays / installmentCount;
+
+  const schedule = [];
+  let runningTotal = 0;
+
+  for (let n = 1; n <= installmentCount; n++) {
+    const isLast = n === installmentCount;
+    // Last installment absorbs whatever remainder rounding left behind,
+    // guaranteeing the schedule sums exactly to totalRepayable.
+    const amount = isLast ? round2(totalRepayable - runningTotal) : baseInstallment;
+    runningTotal = round2(runningTotal + amount);
+
+    schedule.push({
+      installment_number: n,
+      due_date: addDays(disbursementDate, Math.round(intervalDays * n)),
+      amount_due: amount,
+    });
+  }
+
+  return schedule;
+}
+
+/**
+ * Applies a single payment across a loan's installments, in installment_number
+ * order starting from the earliest unpaid one (or a specified starting point).
+ * Overpayment automatically rolls forward to the next unpaid installment
+ * (Section 11). Does not mutate the input array; returns a new one.
+ *
+ * @param {Array<{installment_number:number, amount_due:number, amount_paid:number, status:string}>} installments
+ * @param {number} paymentAmount
+ * @param {number} [startInstallmentNumber] - defaults to earliest unpaid
+ * @returns {{installments: Array, unallocated: number}} unallocated is any
+ *   leftover amount if the payment exceeds the total remaining balance across
+ *   all installments (should be flagged for staff review, not silently dropped).
+ */
+function applyPayment(installments, paymentAmount, startInstallmentNumber = null) {
+  if (paymentAmount <= 0) {
+    throw new Error('paymentAmount must be positive');
+  }
+
+  const sorted = [...installments]
+    .map((i) => ({ ...i }))
+    .sort((a, b) => a.installment_number - b.installment_number);
+
+  let remaining = round2(paymentAmount);
+
+  const startIdx = startInstallmentNumber
+    ? sorted.findIndex((i) => i.installment_number === startInstallmentNumber)
+    : sorted.findIndex((i) => i.status !== 'paid');
+
+  const applyOrder = startIdx === -1 ? [] : sorted.slice(startIdx);
+
+  for (const inst of applyOrder) {
+    if (remaining <= 0) break;
+    const balance = round2(inst.amount_due - inst.amount_paid);
+    if (balance <= 0) continue; // already paid, skip
+
+    const applied = Math.min(remaining, balance);
+    inst.amount_paid = round2(inst.amount_paid + applied);
+    remaining = round2(remaining - applied);
+
+    if (inst.amount_paid >= inst.amount_due) {
+      inst.status = 'paid';
+    } else if (inst.amount_paid > 0) {
+      inst.status = 'partially_paid';
+    }
+  }
+
+  return { installments: sorted, unallocated: remaining };
+}
+
+/**
+ * Days overdue for a single installment, as of `asOfDate` (defaults to now).
+ * Returns 0 if not yet due or already paid.
+ */
+function daysOverdue(installment, asOfDate = new Date()) {
+  if (installment.status === 'paid') return 0;
+  const due = installment.due_date instanceof Date ? installment.due_date : new Date(installment.due_date);
+  const diffMs = asOfDate.setHours(0, 0, 0, 0) - new Date(due).setHours(0, 0, 0, 0);
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  return diffDays > 0 ? diffDays : 0;
+}
+
+/**
+ * PAR aging bucket for a loan, keyed off the EARLIEST overdue installment
+ * (Section 11 reporting note: Tier 2/3 loans must key off earliest overdue
+ * installment, not a single due date).
+ * @param {Array} installments
+ * @param {Date} [asOfDate]
+ * @returns {'current'|'1-30'|'31-60'|'61-90'|'90+'}
+ */
+function getParAgingBucket(installments, asOfDate = new Date()) {
+  const unpaid = installments.filter((i) => i.status !== 'paid');
+  if (unpaid.length === 0) return 'current';
+
+  const overdueDays = unpaid
+    .map((i) => daysOverdue(i, new Date(asOfDate.getTime())))
+    .filter((d) => d > 0);
+
+  if (overdueDays.length === 0) return 'current';
+
+  const maxOverdue = Math.max(...overdueDays);
+
+  if (maxOverdue <= 30) return '1-30';
+  if (maxOverdue <= 60) return '31-60';
+  if (maxOverdue <= 90) return '61-90';
+  return '90+';
+}
+
+module.exports = {
+  round2,
+  calculateFlatInterest,
+  calculateTotalRepayable,
+  addDays,
+  buildInstallmentSchedule,
+  applyPayment,
+  daysOverdue,
+  getParAgingBucket,
+};
